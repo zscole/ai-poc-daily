@@ -1,0 +1,212 @@
+[
+  {
+    "task": "Financial Analysis",
+    "task_type": "parallelizable",
+    "results": {
+      "single_agent": {
+        "accuracy": 0.525,
+        "latency_ms": 800,
+        "error_amplification": 1.0,
+        "improvement_vs_single": -0.1923076923076923
+      },
+      "independent": {
+        "accuracy": 0.0,
+        "latency_ms": 290.0,
+        "error_amplification": 17.2,
+        "improvement_vs_single": -1.0
+      },
+      "centralized": {
+        "accuracy": 1.0,
+        "latency_ms": 362.8571428571429,
+        "error_amplification": 4.4,
+        "improvement_vs_single": 2.6363636363636362
+      },
+      "decentralized": {
+        "accuracy": 0.0,
+        "latency_ms": 403.33333333333337,
+        "error_amplification": 8.5,
+        "improvement_vs_single": -1.0
+      },
+      "hybrid": {
+        "accuracy": 0.0,
+        "latency_ms": 332.5,
+        "error_amplification": 6.0,
+        "improvement_vs_single": -1.0
+      }
+    },
+    "prediction": {
+      "recommended": "centralized",
+      "reasoning": "Highly parallelizable task with low tool density. Centralized coordination can achieve up to 80.9% improvement.",
+      "actual_best": "centralized",
+      "prediction_correct": true
+    }
+  },
+  {
+    "task": "Multi-step Planning",
+    "task_type": "sequential",
+    "results": {
+      "single_agent": {
+        "accuracy": 0.4833333333333334,
+        "latency_ms": 600,
+        "error_amplification": 1.0,
+        "improvement_vs_single": 0.5263157894736842
+      },
+      "independent": {
+        "accuracy": 0.06187723487027981,
+        "latency_ms": 660.0,
+        "error_amplification": 17.2,
+        "improvement_vs_single": -0.8719781347511453
+      },
+      "centralized": {
+        "accuracy": 0.0,
+        "latency_ms": 660.0,
+        "error_amplification": 4.4,
+        "improvement_vs_single": -1.0
+      },
+      "decentralized": {
+        "accuracy": 0.0,
+        "latency_ms": 660.0,
+        "error_amplification": 8.5,
+        "improvement_vs_single": -1.0
+      },
+      "hybrid": {
+        "accuracy": 0.0,
+        "latency_ms": 660.0,
+        "error_amplification": 6.0,
+        "improvement_vs_single": -1.0
+      }
+    },
+    "prediction": {
+      "recommended": "single_agent",
+      "reasoning": "Sequential dependencies prevent effective parallelization. Multi-agent coordination fragments the reasoning process.",
+      "actual_best": "single_agent",
+      "prediction_correct": true
+    }
+  },
+  {
+    "task": "Code Generation",
+    "task_type": "tool_heavy",
+    "results": {
+      "single_agent": {
+        "accuracy": 0.25,
+        "latency_ms": 1000,
+        "error_amplification": 1.0,
+        "improvement_vs_single": -0.2857142857142858
+      },
+      "independent": {
+        "accuracy": 0.0,
+        "latency_ms": 625.0,
+        "error_amplification": 17.2,
+        "improvement_vs_single": -1.0
+      },
+      "centralized": {
+        "accuracy": 0.0,
+        "latency_ms": 678.5714285714286,
+        "error_amplification": 4.4,
+        "improvement_vs_single": -1.0
+      },
+      "decentralized": {
+        "accuracy": 0.0,
+        "latency_ms": 708.3333333333334,
+        "error_amplification": 8.5,
+        "improvement_vs_single": -1.0
+      },
+      "hybrid": {
+        "accuracy": 0.0,
+        "latency_ms": 656.25,
+        "error_amplification": 6.0,
+        "improvement_vs_single": -1.0
+      }
+    },
+    "prediction": {
+      "recommended": "single_agent",
+      "reasoning": "Tool-heavy task would suffer from coordination overhead. The 'tool-coordination trade-off' makes single agent optimal.",
+      "actual_best": "single_agent",
+      "prediction_correct": true
+    }
+  },
+  {
+    "task": "Web Research",
+    "task_type": "parallelizable",
+    "results": {
+      "single_agent": {
+        "accuracy": 0.5666666666666667,
+        "latency_ms": 1200,
+        "error_amplification": 1.0,
+        "improvement_vs_single": -0.12820512820512825
+      },
+      "independent": {
+        "accuracy": 0.0,
+        "latency_ms": 525.0,
+        "error_amplification": 17.2,
+        "improvement_vs_single": -1.0
+      },
+      "centralized": {
+        "accuracy": 0.022581796637521023,
+        "latency_ms": 621.4285714285714,
+        "error_amplification": 4.4,
+        "improvement_vs_single": -0.9532790414396117
+      },
+      "decentralized": {
+        "accuracy": 0.0,
+        "latency_ms": 675.0,
+        "error_amplification": 8.5,
+        "improvement_vs_single": -1.0
+      },
+      "hybrid": {
+        "accuracy": 0.0,
+        "latency_ms": 581.25,
+        "error_amplification": 6.0,
+        "improvement_vs_single": -1.0
+      }
+    },
+    "prediction": {
+      "recommended": "centralized",
+      "reasoning": "Highly parallelizable task with low tool density. Centralized coordination can achieve up to 80.9% improvement.",
+      "actual_best": "single_agent",
+      "prediction_correct": false
+    }
+  },
+  {
+    "task": "Document Processing",
+    "task_type": "hybrid",
+    "results": {
+      "single_agent": {
+        "accuracy": 0.4,
+        "latency_ms": 800,
+        "error_amplification": 1.0,
+        "improvement_vs_single": 0.45454545454545453
+      },
+      "independent": {
+        "accuracy": 0.0,
+        "latency_ms": 440.0,
+        "error_amplification": 17.2,
+        "improvement_vs_single": -1.0
+      },
+      "centralized": {
+        "accuracy": 0.0,
+        "latency_ms": 491.42857142857144,
+        "error_amplification": 4.4,
+        "improvement_vs_single": -1.0
+      },
+      "decentralized": {
+        "accuracy": 0.0,
+        "latency_ms": 520.0,
+        "error_amplification": 8.5,
+        "improvement_vs_single": -1.0
+      },
+      "hybrid": {
+        "accuracy": 0.41154614276713397,
+        "latency_ms": 470.0,
+        "error_amplification": 6.0,
+        "improvement_vs_single": 0.4965314282441234
+      }
+    },
+    "prediction": {
+      "recommended": "hybrid",
+      "reasoning": "Mixed sequential/parallel structure benefits from hierarchical oversight with flexible peer execution.",
+      "actual_best": "hybrid",
+      "prediction_correct": true
+    }
+  }
+]
