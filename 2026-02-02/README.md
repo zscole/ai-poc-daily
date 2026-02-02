@@ -3,7 +3,7 @@
 **Date**: February 2, 2026  
 **Paper**: [Towards a Science of Scaling Agent Systems](https://arxiv.org/abs/2512.08296) (Google Research)
 
-## 🔥 Why This Matters
+## Why This Matters
 
 The AI industry is obsessed with multi-agent systems. Papers like "More Agents Is All You Need" claimed that adding agents consistently improves results. **Google Research just proved this is a myth.**
 
@@ -15,28 +15,28 @@ Their 180-configuration study reveals:
 
 This POC demonstrates these principles so you can make informed architecture decisions.
 
-## 📊 Key Findings Visualized
+## Key Findings Visualized
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ WHEN MULTI-AGENT HELPS                │ WHEN MULTI-AGENT HURTS              │
 ├───────────────────────────────────────┼─────────────────────────────────────┤
-│ ✅ Parallelizable tasks               │ ❌ Sequential reasoning              │
-│ ✅ High decomposability (>0.7)        │ ❌ Tool-heavy tasks (>10 tools)     │
-│ ✅ Financial analysis, research       │ ❌ Multi-step planning              │
-│ ✅ Centralized coordination           │ ❌ Independent (no orchestrator)    │
+│ - Parallelizable tasks               │ - Sequential reasoning              │
+│ - High decomposability (>0.7)        │ - Tool-heavy tasks (>10 tools)     │
+│ - Financial analysis, research       │ - Multi-step planning              │
+│ - Centralized coordination           │ - Independent (no orchestrator)    │
 │    → +80.9% improvement               │    → 39-70% degradation             │
 └───────────────────────────────────────┴─────────────────────────────────────┘
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # No dependencies required (Python 3.8+)
 python3 agent_scaling_simulator.py
 ```
 
-## 🛠️ What It Does
+## What It Does
 
 1. **Simulates 5 Agent Architectures**:
    - Single Agent (baseline)
@@ -58,7 +58,7 @@ python3 agent_scaling_simulator.py
    - Sequential depth
    - Task type
 
-## 📈 Sample Output
+## Sample Output
 
 ```
 SIMULATION SUMMARY - Agent Scaling Principles in Action
@@ -66,17 +66,17 @@ SIMULATION SUMMARY - Agent Scaling Principles in Action
 
 Task                      Type            Best Arch       Predicted       Match
 --------------------------------------------------------------------------------
-Financial Analysis        parallelizable  centralized     centralized     ✓
-Multi-step Planning       sequential      single_agent    single_agent    ✓
-Code Generation           tool_heavy      single_agent    single_agent    ✓
-Web Research              parallelizable  single_agent    centralized     ✗
-Document Processing       hybrid          hybrid          hybrid          ✓
+Financial Analysis        parallelizable  centralized     centralized     YES
+Multi-step Planning       sequential      single_agent    single_agent    YES
+Code Generation           tool_heavy      single_agent    single_agent    YES
+Web Research              parallelizable  single_agent    centralized     NO
+Document Processing       hybrid          hybrid          hybrid          YES
 --------------------------------------------------------------------------------
 
 Prediction Accuracy: 4/5 (80%)
 ```
 
-## 🧠 The Science
+## The Science
 
 ### Error Amplification by Architecture
 
@@ -98,7 +98,7 @@ As tasks require more tools (e.g., a coding agent with 16+ tools), the "tax" of 
 
 Multi-agent coordination yields diminishing or negative returns once single-agent baselines exceed ~45% accuracy. Better models don't remove the need for multi-agent—they accelerate it, but only when the architecture matches the task.
 
-## 💡 Practical Takeaways
+## Practical Takeaways
 
 1. **Don't default to multi-agent**. Analyze your task properties first.
 
@@ -110,13 +110,13 @@ Multi-agent coordination yields diminishing or negative returns once single-agen
 
 5. **Measure decomposability**. If your task can't be split into independent subtasks, multi-agent will hurt.
 
-## 📚 References
+## References
 
 - [Towards a Science of Scaling Agent Systems](https://arxiv.org/abs/2512.08296) - Google Research
 - [Google Blog Post](https://research.google/blog/towards-a-science-of-scaling-agent-systems-when-and-why-agent-systems-work/)
 - [More Agents Is All You Need](https://arxiv.org/abs/2402.05120) - The paper this research challenges
 
-## 🔮 What's Next
+## What's Next
 
 The paper's predictive model (R²=0.524) correctly identifies optimal architecture for 87% of unseen configurations. This POC implements a simplified version of that model.
 
