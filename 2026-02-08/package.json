@@ -1,0 +1,32 @@
+{
+  "name": "agent-skills-runtime",
+  "version": "1.0.0",
+  "description": "A TypeScript runtime for discovering, validating, and executing Agent Skills following the agentskills.io specification",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/demo.ts",
+    "test": "tsx src/test.ts"
+  },
+  "keywords": [
+    "agent-skills",
+    "ai",
+    "llm",
+    "agentic",
+    "codex",
+    "claude"
+  ],
+  "author": "Zak Cole",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "glob": "^11.0.0",
+    "yaml": "^2.7.0"
+  }
+}
