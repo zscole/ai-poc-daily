@@ -1,0 +1,31 @@
+{
+  "name": "transformersjs-v4-webgpu-demo",
+  "version": "1.0.0",
+  "description": "Semantic search demo using Transformers.js v4 with WebGPU acceleration - works in browser AND Node.js",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "demo": "node index.js",
+    "benchmark": "node benchmark.js",
+    "serve": "npx serve -p 3000"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "next"
+  },
+  "devDependencies": {
+    "serve": "^14.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "transformers",
+    "webgpu",
+    "embeddings",
+    "semantic-search",
+    "browser-ai",
+    "edge-ai"
+  ],
+  "license": "MIT"
+}

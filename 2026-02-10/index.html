@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Transformers.js v4 WebGPU Demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      line-height: 1.6;
+    }
+    
+    h1 {
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+    
+    .subtitle {
+      color: #888;
+      margin-bottom: 2rem;
+    }
+    
+    .status-bar {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 2rem;
+      flex-wrap: wrap;
+    }
+    
+    .status-item {
+      background: #1a1a1a;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+    }
+    
+    .status-item.success {
+      border-left: 3px solid #22c55e;
+    }
+    
+    .status-item.warning {
+      border-left: 3px solid #eab308;
+    }
+    
+    .status-item.info {
+      border-left: 3px solid #3b82f6;
+    }
+    
+    .search-section {
+      margin-bottom: 2rem;
+    }
+    
+    .search-box {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    input[type="text"] {
+      flex: 1;
+      padding: 0.75rem 1rem;
+      font-size: 1rem;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #1a1a1a;
+      color: #fff;
+    }
+    
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #3b82f6;
+    }
+    
+    button {
+      padding: 0.75rem 1.5rem;
+      font-size: 1rem;
+      background: #3b82f6;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    button:hover {
+      background: #2563eb;
+    }
+    
+    button:disabled {
+      background: #333;
+      cursor: not-allowed;
+    }
+    
+    .results {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+    
+    .result-item {
+      padding: 1rem;
+      margin-bottom: 0.5rem;
+      background: #252525;
+      border-radius: 6px;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+    
+    .result-item:last-child {
+      margin-bottom: 0;
+    }
+    
+    .similarity-badge {
+      background: #3b82f6;
+      color: white;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      min-width: 50px;
+      text-align: center;
+    }
+    
+    .similarity-badge.high {
+      background: #22c55e;
+    }
+    
+    .similarity-badge.medium {
+      background: #eab308;
+    }
+    
+    .result-text {
+      flex: 1;
+    }
+    
+    .documents-section {
+      margin-top: 2rem;
+    }
+    
+    .documents-section h2 {
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+    
+    .doc-list {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 1rem;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    
+    .doc-item {
+      padding: 0.5rem;
+      border-bottom: 1px solid #333;
+      font-size: 0.9rem;
+      color: #aaa;
+    }
+    
+    .doc-item:last-child {
+      border-bottom: none;
+    }
+    
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+    
+    .metric-card {
+      background: #1a1a1a;
+      padding: 1rem;
+      border-radius: 8px;
+      text-align: center;
+    }
+    
+    .metric-value {
+      font-size: 1.5rem;
+      font-weight: 600;
+      color: #fff;
+    }
+    
+    .metric-label {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 0.25rem;
+    }
+    
+    .loading {
+      text-align: center;
+      padding: 2rem;
+      color: #888;
+    }
+    
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 2px solid #333;
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 0.5rem;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .features {
+      margin-top: 2rem;
+      padding: 1.5rem;
+      background: #1a1a1a;
+      border-radius: 8px;
+    }
+    
+    .features h3 {
+      color: #fff;
+      margin-bottom: 1rem;
+    }
+    
+    .features ul {
+      margin: 0;
+      padding-left: 1.5rem;
+      color: #aaa;
+    }
+    
+    .features li {
+      margin-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Transformers.js v4 WebGPU Demo</h1>
+  <p class="subtitle">Semantic search running 100% in your browser - same code works in Node.js</p>
+  
+  <div class="status-bar">
+    <div id="webgpu-status" class="status-item info">Checking WebGPU...</div>
+    <div id="model-status" class="status-item info">Model: Not loaded</div>
+    <div id="docs-status" class="status-item info">Documents: 0</div>
+  </div>
+  
+  <div class="search-section">
+    <div class="search-box">
+      <input type="text" id="query-input" placeholder="Search for documents..." disabled>
+      <button id="search-btn" disabled>Search</button>
+    </div>
+    
+    <div id="results" class="results">
+      <div class="loading">
+        <span class="loading-spinner"></span>
+        Loading model... This may take a moment on first run.
+      </div>
+    </div>
+  </div>
+  
+  <div class="metrics">
+    <div class="metric-card">
+      <div class="metric-value" id="load-time">--</div>
+      <div class="metric-label">Model Load Time</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value" id="embed-time">--</div>
+      <div class="metric-label">Embedding Time</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value" id="search-time">--</div>
+      <div class="metric-label">Last Search Time</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-value" id="throughput">--</div>
+      <div class="metric-label">Embeddings/sec</div>
+    </div>
+  </div>
+  
+  <div class="documents-section">
+    <h2>Document Corpus (15 documents)</h2>
+    <div id="doc-list" class="doc-list"></div>
+  </div>
+  
+  <div class="features">
+    <h3>Transformers.js v4 Features Demonstrated</h3>
+    <ul>
+      <li>WebGPU acceleration (with WASM fallback)</li>
+      <li>New C++ ONNX Runtime for cross-platform support</li>
+      <li>Same code runs in browser, Node.js, Bun, and Deno</li>
+      <li>Offline support after initial model download</li>
+      <li>4x speedup for BERT models with fused attention</li>
+      <li>Standalone tokenizers library (8.8kB gzipped)</li>
+    </ul>
+  </div>
+
+  <script type="module">
+    import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@next';
+    
+    // Sample documents
+    const DOCUMENTS = [
+      "WebGPU is a new web standard for GPU acceleration in browsers.",
+      "Transformers.js v4 brings WebGPU support to Node.js and Deno.",
+      "ONNX Runtime's new C++ WebGPU backend enables cross-platform AI.",
+      "Semantic search uses embeddings to find conceptually similar text.",
+      "Large language models can now run entirely in the browser.",
+      "Edge AI reduces latency by processing data locally.",
+      "The new tokenizers library is only 8.8kB gzipped.",
+      "BERT models achieve 4x speedup with MultiHeadAttention operators.",
+      "Vector databases store embeddings for similarity search.",
+      "Fine-tuning allows models to specialize for specific domains.",
+      "Mixture of Experts architectures improve model efficiency.",
+      "State-space models like Mamba offer alternatives to attention.",
+      "Quantization reduces model size while preserving accuracy.",
+      "WebAssembly enables running compiled code in browsers.",
+      "The ONNX format provides interoperability between frameworks."
+    ];
+    
+    let embedder = null;
+    let documentEmbeddings = [];
+    
+    // DOM elements
+    const webgpuStatus = document.getElementById('webgpu-status');
+    const modelStatus = document.getElementById('model-status');
+    const docsStatus = document.getElementById('docs-status');
+    const queryInput = document.getElementById('query-input');
+    const searchBtn = document.getElementById('search-btn');
+    const resultsDiv = document.getElementById('results');
+    const docList = document.getElementById('doc-list');
+    const loadTimeEl = document.getElementById('load-time');
+    const embedTimeEl = document.getElementById('embed-time');
+    const searchTimeEl = document.getElementById('search-time');
+    const throughputEl = document.getElementById('throughput');
+    
+    // Cosine similarity
+    function cosineSimilarity(a, b) {
+      let dot = 0, normA = 0, normB = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        normA += a[i] * a[i];
+        normB += b[i] * b[i];
+      }
+      return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+    
+    // Check WebGPU
+    async function checkWebGPU() {
+      if (navigator.gpu) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (adapter) {
+            webgpuStatus.textContent = 'WebGPU: Available';
+            webgpuStatus.classList.remove('info');
+            webgpuStatus.classList.add('success');
+            return true;
+          }
+        } catch (e) {}
+      }
+      webgpuStatus.textContent = 'WebGPU: Using WASM fallback';
+      webgpuStatus.classList.remove('info');
+      webgpuStatus.classList.add('warning');
+      return false;
+    }
+    
+    // Display documents
+    function displayDocuments() {
+      docList.innerHTML = DOCUMENTS.map((doc, i) => 
+        `<div class="doc-item">${i + 1}. ${doc}</div>`
+      ).join('');
+    }
+    
+    // Initialize
+    async function init() {
+      displayDocuments();
+      await checkWebGPU();
+      
+      // Load model
+      modelStatus.textContent = 'Model: Loading...';
+      const loadStart = performance.now();
+      
+      try {
+        embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          dtype: 'fp32',
+          device: 'auto'
+        });
+        
+        const loadTime = performance.now() - loadStart;
+        loadTimeEl.textContent = `${(loadTime / 1000).toFixed(2)}s`;
+        modelStatus.textContent = 'Model: Ready';
+        modelStatus.classList.remove('info');
+        modelStatus.classList.add('success');
+        
+        // Embed documents
+        resultsDiv.innerHTML = '<div class="loading"><span class="loading-spinner"></span>Embedding documents...</div>';
+        const embedStart = performance.now();
+        
+        for (const doc of DOCUMENTS) {
+          const output = await embedder(doc, { pooling: 'mean', normalize: true });
+          documentEmbeddings.push(Array.from(output.data));
+        }
+        
+        const embedTime = performance.now() - embedStart;
+        embedTimeEl.textContent = `${(embedTime / 1000).toFixed(2)}s`;
+        throughputEl.textContent = `${(DOCUMENTS.length / (embedTime / 1000)).toFixed(1)}`;
+        
+        docsStatus.textContent = `Documents: ${DOCUMENTS.length} embedded`;
+        docsStatus.classList.remove('info');
+        docsStatus.classList.add('success');
+        
+        // Enable search
+        queryInput.disabled = false;
+        searchBtn.disabled = false;
+        resultsDiv.innerHTML = '<p style="text-align: center; color: #888;">Enter a query to search the documents</p>';
+        
+      } catch (error) {
+        modelStatus.textContent = 'Model: Error';
+        modelStatus.classList.add('warning');
+        resultsDiv.innerHTML = `<p style="color: #ef4444;">Error: ${error.message}</p>`;
+      }
+    }
+    
+    // Search function
+    async function search() {
+      const query = queryInput.value.trim();
+      if (!query || !embedder) return;
+      
+      searchBtn.disabled = true;
+      const searchStart = performance.now();
+      
+      // Embed query
+      const output = await embedder(query, { pooling: 'mean', normalize: true });
+      const queryEmbedding = Array.from(output.data);
+      
+      // Calculate similarities
+      const results = documentEmbeddings.map((docEmb, idx) => ({
+        document: DOCUMENTS[idx],
+        similarity: cosineSimilarity(queryEmbedding, docEmb)
+      }));
+      
+      // Sort and get top 5
+      results.sort((a, b) => b.similarity - a.similarity);
+      const topResults = results.slice(0, 5);
+      
+      const searchTime = performance.now() - searchStart;
+      searchTimeEl.textContent = `${searchTime.toFixed(0)}ms`;
+      
+      // Display results
+      resultsDiv.innerHTML = topResults.map(r => {
+        const pct = (r.similarity * 100).toFixed(1);
+        let badgeClass = '';
+        if (r.similarity > 0.5) badgeClass = 'high';
+        else if (r.similarity > 0.3) badgeClass = 'medium';
+        
+        return `
+          <div class="result-item">
+            <div class="similarity-badge ${badgeClass}">${pct}%</div>
+            <div class="result-text">${r.document}</div>
+          </div>
+        `;
+      }).join('');
+      
+      searchBtn.disabled = false;
+    }
+    
+    // Event listeners
+    searchBtn.addEventListener('click', search);
+    queryInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') search();
+    });
+    
+    // Start
+    init();
+  </script>
+</body>
+</html>
