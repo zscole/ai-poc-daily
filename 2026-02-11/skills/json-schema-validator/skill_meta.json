@@ -1,0 +1,37 @@
+{
+  "name": "json-schema-validator",
+  "description": "Validate JSON objects against schemas with clear error reporting",
+  "created": "2026-02-11T03:04:07.777603",
+  "test_cases": [
+    {
+      "input_prompt": "Validate {\"name\": 123} against schema {\"name\": \"string\"}",
+      "expected_contains": [
+        "wrong type",
+        "string",
+        "number"
+      ],
+      "expected_not_contains": [],
+      "context": "Basic type mismatch"
+    },
+    {
+      "input_prompt": "Validate {\"email\": \"bad\"} against schema {\"email\": \"email\"}",
+      "expected_contains": [
+        "invalid",
+        "email"
+      ],
+      "expected_not_contains": [],
+      "context": "Format validation"
+    },
+    {
+      "input_prompt": "Validate {} against schema {\"required\": [\"name\"]}",
+      "expected_contains": [
+        "required",
+        "missing",
+        "name"
+      ],
+      "expected_not_contains": [],
+      "context": "Required field check"
+    }
+  ],
+  "demo": true
+}

@@ -1,0 +1,39 @@
+{
+  "name": "python-security-review",
+  "description": "Review Python code for common security vulnerabilities",
+  "created": "2026-02-11T03:04:11.502401",
+  "test_cases": [
+    {
+      "input_prompt": "Review this code:\ndef login(username, password):\n    query = f\"SELECT * FROM users WHERE username = '{username}'\"\n    user = db.execute(query).fetchone()\n    if user and user.password == password:\n        return create_session(user)",
+      "expected_contains": [
+        "SQL",
+        "injection",
+        "CRITICAL"
+      ],
+      "expected_not_contains": [],
+      "context": "SQL injection vulnerability"
+    },
+    {
+      "input_prompt": "Review this code:\nimport pickle\ndef load_config(data):\n    return pickle.loads(base64.b64decode(data))",
+      "expected_contains": [
+        "pickle",
+        "deserialization",
+        "untrusted"
+      ],
+      "expected_not_contains": [],
+      "context": "Insecure deserialization"
+    },
+    {
+      "input_prompt": "Review this code:\nAPI_KEY = \"sk-1234567890abcdef\"\ndef call_api():\n    return requests.get(URL, headers={\"Authorization\": API_KEY})",
+      "expected_contains": [
+        "hardcoded",
+        "secret",
+        "credential"
+      ],
+      "expected_not_contains": [],
+      "context": "Hardcoded secrets"
+    }
+  ],
+  "domain": "security",
+  "language": "python"
+}
