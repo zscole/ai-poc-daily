@@ -2,6 +2,20 @@
 
 A proof-of-concept demonstration of cutting-edge **agentic coding** capabilities, inspired by the recent wave of AI-powered development tools and Apple's integration of AI agents into Xcode.
 
+## 🚀 QUICK START - See It In Action
+
+```bash
+python3 agentic_coder.py
+```
+
+**This actually works!** It will:
+- Find 11 specific code issues across 2 demo files
+- Apply 4 automatic security and error handling fixes  
+- Show detailed execution logs and timing
+- Modify actual files with improvements
+
+See [EXAMPLE_OUTPUT.md](EXAMPLE_OUTPUT.md) for the complete output.
+
 ## What This Demonstrates
 
 This POC showcases an autonomous AI system that can:
