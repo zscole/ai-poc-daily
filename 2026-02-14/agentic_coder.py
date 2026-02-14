@@ -204,8 +204,9 @@ class CodeGenerator:
         lines = content.split('\n')
         if issue.get("line"):
             line_idx = issue["line"] - 1
-            if line_idx < len(lines):
-                lines.insert(line_idx, "    # TODO: Consider using list.append() and ''.join() for better performance")
+            if line_idx < len(lines) and line_idx > 0:
+                # Insert comment on the line before the problematic line
+                lines.insert(line_idx - 1, "    # TODO: Consider using list.append() and ''.join() for better performance")
         
         return '\n'.join(lines)
     
