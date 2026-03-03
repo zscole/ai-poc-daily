@@ -1,0 +1,102 @@
+[
+  {
+    "timestamp": "2026-03-03T00:19:10.739223",
+    "presence": {
+      "detected": false,
+      "confidence": 0.697
+    },
+    "pose": {
+      "classification": "none",
+      "confidence": 0,
+      "probabilities": {}
+    },
+    "vitals": {
+      "breathing_rate_bpm": 0,
+      "signal_quality": 0
+    },
+    "features_summary": {
+      "mean_amplitude": 0.998,
+      "std_deviation": 0.102,
+      "signal_variance": 0.01,
+      "peak_variation": 0.428
+    }
+  },
+  {
+    "timestamp": "2026-03-03T00:19:10.741983",
+    "presence": {
+      "detected": true,
+      "confidence": 1.0
+    },
+    "pose": {
+      "classification": "standing",
+      "confidence": 0.609,
+      "probabilities": {
+        "standing": 0.609,
+        "sitting": 0.281,
+        "lying": 0.11
+      }
+    },
+    "vitals": {
+      "breathing_rate_bpm": 30,
+      "signal_quality": 0.123
+    },
+    "features_summary": {
+      "mean_amplitude": 1.023,
+      "std_deviation": 0.123,
+      "signal_variance": 0.015,
+      "peak_variation": 0.402
+    }
+  },
+  {
+    "timestamp": "2026-03-03T00:19:10.744631",
+    "presence": {
+      "detected": true,
+      "confidence": 1.0
+    },
+    "pose": {
+      "classification": "standing",
+      "confidence": 0.606,
+      "probabilities": {
+        "standing": 0.606,
+        "sitting": 0.281,
+        "lying": 0.113
+      }
+    },
+    "vitals": {
+      "breathing_rate_bpm": 30,
+      "signal_quality": 0.147
+    },
+    "features_summary": {
+      "mean_amplitude": 1.021,
+      "std_deviation": 0.147,
+      "signal_variance": 0.022,
+      "peak_variation": 0.446
+    }
+  },
+  {
+    "timestamp": "2026-03-03T00:19:10.747703",
+    "presence": {
+      "detected": true,
+      "confidence": 1.0
+    },
+    "pose": {
+      "classification": "standing",
+      "confidence": 0.608,
+      "probabilities": {
+        "standing": 0.608,
+        "sitting": 0.277,
+        "lying": 0.115
+      }
+    },
+    "vitals": {
+      "breathing_rate_bpm": 30,
+      "signal_quality": 0.17
+    },
+    "features_summary": {
+      "mean_amplitude": 1.0,
+      "std_deviation": 0.17,
+      "signal_variance": 0.029,
+      "peak_variation": 0.556
+    }
+  }
+]

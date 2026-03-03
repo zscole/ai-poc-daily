@@ -1,0 +1,4 @@
+numpy>=1.21.0
+websockets>=10.0
+asyncio-mqtt>=0.11.0
+scipy>=1.8.0
