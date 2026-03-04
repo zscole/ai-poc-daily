@@ -1,0 +1,7 @@
+# No external dependencies required - uses only Python standard library
+# This implementation runs on Python 3.7+
+
+# For production use, you might want:
+# torch>=1.12.0
+# transformers>=4.20.0
+# numpy>=1.21.0
