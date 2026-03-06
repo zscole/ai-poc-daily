@@ -1,0 +1,2 @@
+# AgentGuard - No external dependencies
+# Uses only Python standard library for maximum portability
