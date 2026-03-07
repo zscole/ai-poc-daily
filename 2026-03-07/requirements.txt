@@ -1,0 +1,15 @@
+psutil==5.9.8
+requests==2.31.0
+docker==7.0.0
+sqlite3
+asyncio
+aiohttp==3.9.3
+pydantic==2.6.1
+structlog==24.1.0
+rich==13.7.0
+networkx==3.2.1
+prometheus-client==0.20.0
+paramiko==3.4.0
+nmap==0.0.1
+python-nmap==0.7.1
+py-cpuinfo==9.0.0
