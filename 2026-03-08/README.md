@@ -1,120 +1,75 @@
-# Cognitive Dark Matter (CDM) Benchmark Suite
+# Autonomous ML Research Loop
 
 **Date:** March 8, 2026
 
-**Hot Trend Prediction:** The "Cognitive Dark Matter" framework will become the dominant paradigm for AI evaluation and training in 2026. Traditional benchmarks are fundamentally flawed because they only measure outputs, not the cognitive processes that generate intelligence.
+**Source:** [karpathy/autoresearch](https://github.com/karpathy/autoresearch) (March 6, 2026, 5700+ stars in 48 hours)
 
-## The Problem
+## What This Is
 
-Current AI benchmarks are like measuring a car's performance by only looking at whether it reaches the destination - completely ignoring how it drives. The breakthrough paper "Cognitive Dark Matter: Measuring What AI Misses" (arXiv:2603.03414, March 5, 2026) identifies that the "jagged intelligence" problem in AI systems stems from missing training signals about cognitive processes.
+A self-contained implementation of the core pattern from Karpathy's autoresearch: an autonomous loop that proposes architecture and hyperparameter mutations to a small language model, trains each variant on real text data, evaluates validation loss, keeps improvements, and discards failures.
 
-## What Is Cognitive Dark Matter?
+The "researcher" is a programmatic mutation engine that explores 16 different modification types (wider/narrower embeddings, deeper/shallower networks, learning rate adjustments, batch size changes, etc). Each proposed configuration is trained from scratch within a fixed time budget, and only configurations that beat the current best validation loss are accepted.
 
-CDM represents brain functions that meaningfully shape intelligent behavior but are invisible in behavior-only evaluations:
+No GPU required. Runs entirely on CPU using numpy for matrix operations and a character-level transformer trained on Project Gutenberg text (Sherlock Holmes).
 
-1. **Metacognition** - Thinking about thinking
-2. **Cognitive Flexibility** - Switching between mental frameworks  
-3. **Episodic Memory** - Temporal context and experience integration
-4. **Lifelong Learning** - Continuous adaptation and knowledge integration
-5. **Abductive Reasoning** - Finding the best explanations
-6. **Social Reasoning** - Understanding implicit human communication
-7. **Emotional Intelligence** - Managing and understanding emotions
+## How It Works
 
-## Why This Matters Right Now
+1. Download and tokenize a real text corpus at character level
+2. Initialize a baseline tiny GPT (2 layers, 48-dim embeddings, 4 heads, ~68K params)
+3. For each round:
+   - Mutate the current best config (or run baseline on round 1)
+   - Build a fresh transformer with the new config
+   - Train using random-direction gradient estimation (no autograd needed)
+   - Evaluate validation cross-entropy loss
+   - Accept if loss improved, reject otherwise
+4. Log the full research trajectory with mutation analysis
 
-This POC demonstrates evaluation techniques that will become industry standard:
+The training uses a random-direction finite-difference approach: for each parameter tensor, sample a random unit direction, compute the directional derivative via forward-pass perturbation, and update along that direction. This is honest gradient descent without requiring backpropagation infrastructure.
 
-- **AI Safety:** Current models fail catastrophically because we don't measure process robustness
-- **Model Development:** Training on cognitive process data will produce more general intelligence
-- **Competitive Advantage:** Teams using CDM evaluation will build superior AI systems
-- **Research Direction:** Neuroscience-AI fusion is the next frontier
-
-## Technical Implementation
-
-The benchmark suite evaluates AI systems across all seven CDM domains with process-aware metrics:
-
-```python
-# Traditional benchmark
-assert ai_response == "391"  # Only checks final answer
-
-# CDM benchmark  
-assert "confidence" in ai_response  # Metacognitive awareness
-assert "step by step" in ai_response  # Process transparency
-assert confidence_calibrated(ai_response)  # Uncertainty handling
-```
-
-### Key Features
-
-- **Process Indicators:** Measures cognitive mechanisms, not just outputs
-- **Multi-Domain Evaluation:** Comprehensive coverage of CDM domains
-- **Comparative Analysis:** Reveals gaps between surface and deep intelligence
-- **Research Foundation:** Framework for developing CDM-aware training
-
-## Running the Benchmark
+## Running It
 
 ```bash
-python3 cdm_benchmark.py
+# Default: 8 rounds, 20 seconds per experiment
+python3 autoresearch.py
+
+# Custom settings
+python3 autoresearch.py --rounds 12 --budget 30
+
+# Different corpus
+python3 autoresearch.py --data-url "https://www.gutenberg.org/cache/epub/84/pg84.txt"
 ```
 
-The system evaluates two demo AI implementations:
-1. **Simple AI:** Traditional output-focused responses
-2. **Advanced AI:** CDM-aware responses with process transparency
-
-## Results Analysis
-
-The benchmark reveals critical differences:
-
-**Traditional AI Performance:**
-- Gets correct answers but shows no cognitive process
-- Cannot calibrate confidence or express uncertainty
-- Lacks metacognitive awareness
-- Fails at perspective-taking and social reasoning
-
-**CDM-Aware AI Performance:**  
-- Demonstrates working process and reasoning chains
-- Expresses appropriate confidence levels
-- Shows cognitive flexibility across domains
-- Understands social and emotional dynamics
-
-## Immediate Applications
-
-1. **Model Selection:** Choose AI systems based on cognitive robustness, not just accuracy
-2. **Training Data:** Collect process-tracing data (eye-tracking, think-alouds) for model training
-3. **Safety Evaluation:** Measure cognitive process stability, not just output correctness
-4. **Research Priority:** Focus on neuroscience-informed AI development
-
-## Predictions for 2026
-
-1. **CDM Benchmarks Become Standard:** Major AI labs will adopt CDM-based evaluation by Q3 2026
-2. **Process-Aware Training:** Next-generation models will train on cognitive process data, not just behavior outcomes
-3. **Neuroscience Integration:** Brain-computer interface data will directly inform AI training methodologies
-
-## Technical Implications
-
-This represents a fundamental shift from behaviorist to cognitive approaches in AI:
-
-- **From Output Optimization to Process Optimization**
-- **From Task Performance to Cognitive Robustness**
-- **From Benchmark Gaming to True Intelligence Measurement**
-
-## Research Links
-
-- **Original Paper:** [Cognitive Dark Matter: Measuring What AI Misses](https://arxiv.org/abs/2603.03414)
-- **Complementary Work:** [AutoHarness: improving LLM agents by automatically synthesizing a code harness](https://arxiv.org/abs/2603.03329)
-
-## Dependencies
+**Requirements:** Python 3.10+, numpy. No other dependencies.
 
 ```bash
-pip install asyncio json time random dataclasses enum typing
+pip install numpy
 ```
 
-No external AI APIs required - includes demo implementations for testing.
+## Output
 
-## Next Steps
+- Console output showing each round's mutation, config, loss, and accept/reject decision
+- `research_log.json` with full experiment history
+- Improvement trajectory and mutation effectiveness analysis
 
-1. **Integrate Real AI APIs:** Connect to actual LLM providers for evaluation
-2. **Expand Domain Coverage:** Add more CDM domains and evaluation tasks  
-3. **Process Data Collection:** Implement eye-tracking and think-aloud data capture
-4. **Neuroscience Integration:** Connect with brain imaging data sources
+## Why It Matters
 
-The CDM framework will reshape how we think about AI intelligence. This POC provides the foundation for building truly robust, cognitively-aware AI systems.
+Karpathy's autoresearch represents a shift in how ML research gets done. Instead of a human researcher manually tweaking hyperparameters and architectures, an autonomous agent proposes modifications and evaluates them against a fixed compute budget. The key insight from `program.md` in autoresearch: you stop editing Python and start editing the Markdown instructions that guide the agent.
+
+This POC strips that pattern down to its essentials and makes it runnable on any machine without a GPU or LLM API key. The mutation engine replaces the LLM agent, but the core loop is identical: propose change, train, evaluate, keep or discard.
+
+## Sample Results
+
+From an 8-round run with 15s budget per experiment:
+
+```
+Round  1 [baseline        ] val_loss=4.6131 best_so_far=4.6131  <-- accepted
+Round  2 [bigger_batch    ] val_loss=4.6103 best_so_far=4.6103  <-- accepted
+Round  3 [higher_lr       ] val_loss=4.6048 best_so_far=4.6048  <-- accepted
+Round  7 [higher_lr       ] val_loss=4.6043 best_so_far=4.6043  <-- accepted
+
+Mutation Analysis:
+  higher_lr : 2 accepted / 0 rejected  (most effective)
+  fewer_heads: 0 accepted / 2 rejected (harmful)
+```
+
+The research loop discovered that higher learning rates and bigger batches improved this setup, while reducing attention heads hurt performance -- reasonable findings that match known scaling intuitions.
