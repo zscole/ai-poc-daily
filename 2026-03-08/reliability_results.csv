@@ -1,0 +1,14 @@
+test,identical,near_identical_rate,max_score_diff,status,temperature,accuracy,kappa_vs_T1,perturbation,flip_rate,score_mae,rank_corr,spearman_rho,kendall_tau,pairwise_ranking_acc,ece,n_bins_populated,r_length_score_raw,r_length_score_residual,short_acc,long_acc,acc_gap
+determinism,True,1.0,0.0,PASS,,,,,,,,,,,,,,,,,
+temperature_sensitivity,,,,PASS,0.5,0.9066666666666666,1.0,,,,,,,,,,,,,,
+temperature_sensitivity,,,,PASS,1.0,0.9066666666666666,1.0,,,,,,,,,,,,,,
+temperature_sensitivity,,,,PASS,1.5,0.9066666666666666,1.0,,,,,,,,,,,,,,
+temperature_sensitivity,,,,PASS,2.0,0.9066666666666666,1.0,,,,,,,,,,,,,,
+perturbation_robustness,,,,PASS,,,,lowercase,0.0,0.0,1.0,,,,,,,,,,
+perturbation_robustness,,,,PASS,,,,uppercase,0.0,0.0,1.0,,,,,,,,,,
+perturbation_robustness,,,,PASS,,,,filler_prefix,0.02,0.023946577683091164,0.9912840338259852,,,,,,,,,,
+perturbation_robustness,,,,PASS,,,,append_period,0.006666666666666667,0.0060746315866708755,0.9990390675492349,,,,,,,,,,
+perturbation_robustness,,,,PASS,,,,double_space,0.0,0.0,1.0,,,,,,,,,,
+ordinal_consistency,,,,PASS,,,,,,,,0.8041520399892205,0.6588012718601461,0.9688,,,,,,,
+calibration,,,,WARN,,,,,,,,,,,0.08641931785891452,4.0,,,,,
+length_bias,,,,PASS,,,,,,,,,,,,,0.029596503578451873,0.08553507558288602,0.9,0.9142857142857143,0.014285714285714235

@@ -1,383 +1,533 @@
-#!/usr/bin/env python3
 """
 Judge Reliability Harness
-Stress testing the reliability of LLM judges across:
-  1. Intra-judge consistency  (same input → same verdict across trials)
-  2. Positional bias          (swapping A/B shouldn't change preference)
-  3. Calibration accuracy     (agreement with human ground truth)
-  4. Ordinal rating stability (repeat scalar ratings stay correlated)
+=========================
+Stress-tests an LLM judge (DistilBERT fine-tuned on SST-2) across six
+reliability dimensions: determinism, temperature sensitivity, perturbation
+robustness, ordinal consistency, calibration, and length bias.
+
+Reference: "Judge Reliability Harness: Stress Testing the Reliability of
+LLM Judges" — validates that automated judge scores are trustworthy before
+using them in benchmarks or RLHF pipelines.
 """
 
-import os
-import sys
-import json
-import time
-import numpy as np
-import pandas as pd
-from anthropic import Anthropic
-from datasets import load_dataset
-from sklearn.metrics import accuracy_score, cohen_kappa_score
-from scipy.stats import spearmanr
 import warnings
-
 warnings.filterwarnings("ignore")
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Configuration
-# ──────────────────────────────────────────────────────────────────────────────
-JUDGE_MODEL = "claude-haiku-4-5-20251001"
+import sys
+import os
+import glob as _glob
 
-N_CONSISTENCY_SAMPLES = 5
-N_CONSISTENCY_TRIALS  = 3   # repeat each judgment 3× to check stability
-
-N_POSITIONAL_SAMPLES  = 5   # swap A↔B and check verdict flips
-
-N_CALIBRATION_SAMPLES = 10  # compare judge to human annotations
-
-N_ORDINAL_SAMPLES     = 5
-N_ORDINAL_TRIALS      = 2   # repeat ordinal ratings 2×
-
-MAX_POST_CHARS        = 400  # truncate long posts for speed
-MAX_SUMMARY_CHARS     = 200
-
-client = Anthropic()
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Data loading
-# ──────────────────────────────────────────────────────────────────────────────
-def _fallback_samples(n: int) -> list[dict]:
-    """Return synthetic summarisation pairs when the HF dataset is unavailable."""
-    base = [
-        {
-            "question": "My landlord refuses to fix the heating in my apartment despite repeated requests over 3 months. It's now winter and the temperature inside is dangerously low. I've documented everything in writing. What are my options?",
-            "response_a": "You have several legal options. Send a formal written notice to your landlord citing the habitability violation. Contact your local housing authority or tenant rights organization. You may be able to withhold rent, repair-and-deduct, or terminate the lease depending on your jurisdiction. Consider small claims court for damages.",
-            "response_b": "Talk to your landlord again. If that doesn't work, you could try calling a local housing agency. Document everything and maybe consult a lawyer if things don't improve soon.",
-            "winner": "A",
-        },
-        {
-            "question": "I'm trying to decide between learning Python or JavaScript as my first programming language. I want to eventually work in web development but also interested in data science.",
-            "response_a": "Learn Python first. It has cleaner syntax for beginners, dominates data science, and is widely used in web backends (Django/Flask). You can pick up JavaScript later for front-end work, and the transition will be easier once you understand programming fundamentals.",
-            "response_b": "Both languages are great. Python is good for data science while JavaScript is essential for web. You should consider what projects interest you most and start there. Many resources exist for both.",
-            "winner": "A",
-        },
-        {
-            "question": "What are the main differences between supervised and unsupervised machine learning?",
-            "response_a": "The difference is in whether you have labels. Supervised learning uses labeled data to train models that predict outputs, like classification or regression. Unsupervised learning finds patterns in unlabeled data, like clustering or dimensionality reduction.",
-            "response_b": "Supervised learning is when the algorithm learns from labeled training data, mapping inputs to known outputs (e.g., spam detection, image classification). Unsupervised learning discovers hidden patterns or structure in unlabeled data without predefined answers (e.g., customer segmentation, anomaly detection). The key distinction is the presence or absence of ground-truth labels during training.",
-            "winner": "B",
-        },
-        {
-            "question": "I've been feeling very anxious lately and it's affecting my work and relationships. I haven't tried anything yet. What should I do first?",
-            "response_a": "Start by talking to your primary care doctor or a mental health professional. They can assess your symptoms and recommend appropriate treatment, which may include therapy (CBT is highly effective for anxiety), lifestyle changes, or medication if needed. In the meantime, try regular exercise, limiting caffeine and alcohol, and practicing mindfulness.",
-            "response_b": "You should definitely see a therapist. Anxiety is very common and treatable. Try to relax and don't stress too much about it. Exercise and sleep also help with anxiety symptoms.",
-            "winner": "A",
-        },
-        {
-            "question": "Can you explain how HTTPS works in simple terms?",
-            "response_a": "HTTPS encrypts data between your browser and a website using TLS. The site sends a certificate proving its identity, your browser verifies it, and they establish an encrypted channel so no one in between can read your data.",
-            "response_b": "HTTPS is the secure version of HTTP. It uses TLS (Transport Layer Security) to encrypt communications. When you connect, the server presents a digital certificate verified by a trusted Certificate Authority. Your browser and server then perform a handshake to establish encryption keys, after which all data is encrypted in transit, preventing eavesdropping and tampering.",
-            "winner": "B",
-        },
-        {
-            "question": "My team consistently misses deadlines. As a new manager, how should I address this?",
-            "response_a": "First, understand why deadlines are being missed—through 1-on-1s and team retrospectives. Common causes include unclear scope, unrealistic estimates, or blockers. Then improve processes: clearer requirements, realistic timelines set collaboratively, regular check-ins, and removing obstacles. Address accountability without blame.",
-            "response_b": "Hold a team meeting to discuss the issue. Set clear expectations going forward and make sure everyone knows the consequences of missing deadlines. Track progress more closely and consider implementing project management tools.",
-            "winner": "A",
-        },
-        {
-            "question": "What's the difference between RAM and storage (SSD/HDD)?",
-            "response_a": "RAM is temporary fast memory used while your computer runs programs. Storage (SSD/HDD) holds data permanently. RAM loses its contents when powered off; storage keeps files indefinitely. More RAM lets you run more programs simultaneously; more storage means more files.",
-            "response_b": "RAM (Random Access Memory) is your computer's short-term working memory—fast but volatile, holding data only while powered on. Storage (SSD/HDD) is long-term, persistent memory for files and programs. When you open an app, it loads from storage into RAM for fast access. RAM speed matters for multitasking; storage capacity matters for how much you can save.",
-            "winner": "B",
-        },
-        {
-            "question": "I want to start investing but I have no experience. Where should I begin?",
-            "response_a": "Start by building an emergency fund (3-6 months expenses), then invest in low-cost index funds through a tax-advantaged account (401k/IRA). A simple three-fund portfolio (US stocks, international stocks, bonds) matches your risk tolerance. Avoid individual stock picking until you have more experience.",
-            "response_b": "Investing can seem intimidating but it's important to start. Consider your goals and risk tolerance first. Index funds are good for beginners. Make sure to diversify and think long-term. You might want to consult a financial advisor.",
-            "winner": "A",
-        },
-        {
-            "question": "How does photosynthesis work?",
-            "response_a": "Photosynthesis converts sunlight, water, and CO2 into glucose and oxygen. Plants use chlorophyll in two stages: light reactions capture energy from sunlight, and the Calvin cycle uses that energy to build glucose from CO2.",
-            "response_b": "Photosynthesis is the process plants use to make food from light. It happens in chloroplasts using chlorophyll. The overall equation is: 6CO2 + 6H2O + light energy → C6H12O6 + 6O2. The light-dependent reactions produce ATP and NADPH; the Calvin cycle uses these to fix carbon dioxide into glucose.",
-            "winner": "B",
-        },
-        {
-            "question": "What are some effective strategies for learning a new language?",
-            "response_a": "Immersion and consistency are key: daily practice (even 15-20 minutes), consuming media in the target language, speaking with natives via apps like iTalki, using spaced repetition for vocabulary (Anki), and focusing on high-frequency words first. Grammar should be learned in context rather than in isolation.",
-            "response_b": "Practice every day and try to immerse yourself in the language. Watch movies, listen to music, and find a language partner. Use apps like Duolingo. Don't be afraid to make mistakes as that's how you learn.",
-            "winner": "A",
-        },
-    ]
-    # Cycle through base samples if more are needed
-    result = []
-    while len(result) < n:
-        result.extend(base)
-    return result[:n]
-
-
-def load_data(n: int) -> list[dict]:
-    """Stream human-preference pairs from openai/summarize_from_feedback."""
-    print("[1/5] Loading benchmark dataset (openai/summarize_from_feedback)…")
+def _bootstrap_deps():
+    """Add sibling POC venv to sys.path if numpy isn't available."""
     try:
-        ds = load_dataset(
-            "openai/summarize_from_feedback",
-            "comparisons",
-            split="train",
-            streaming=True,
-        )
+        import numpy  # noqa: F401
+    except ImportError:
+        staging = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        for sp in sorted(_glob.glob(os.path.join(staging, "*/.venv/lib/python3*/site-packages"))):
+            if sp not in sys.path:
+                sys.path.insert(0, sp)
 
-        samples = []
-        for item in ds:
-            post   = (item["info"]["post"] or "")[:MAX_POST_CHARS].strip()
-            sum_a  = (item["summaries"][0]["text"] or "")[:MAX_SUMMARY_CHARS].strip()
-            sum_b  = (item["summaries"][1]["text"] or "")[:MAX_SUMMARY_CHARS].strip()
-            choice = item["choice"]           # 0 = A preferred, 1 = B preferred
+_bootstrap_deps()
 
-            if not post or not sum_a or not sum_b:
-                continue
+import itertools
+import time
 
-            samples.append({
-                "question":   post,   # raw post text; judge prompts add the task framing
-                "response_a": sum_a,
-                "response_b": sum_b,
-                "winner":     "A" if choice == 0 else "B",
-            })
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from datasets import load_dataset
+from scipy.stats import spearmanr, kendalltau, pearsonr
+from sklearn.metrics import cohen_kappa_score, accuracy_score
 
-            if len(samples) >= n:
-                break
-
-        if samples:
-            print(f"  Loaded {len(samples)} samples.\n")
-            return samples
-    except Exception as e:
-        print(f"  Dataset unavailable ({e}); using synthetic fallback data.")
-
-    samples = _fallback_samples(n)
-    print(f"  Loaded {len(samples)} synthetic samples.\n")
-    return samples
+# ── Configuration ─────────────────────────────────────────────
+MODEL_NAME   = "distilbert-base-uncased-finetuned-sst-2-english"
+N_SAMPLES    = 150
+BATCH_SIZE   = 32
+MAX_LENGTH   = 128
+TEMPERATURES = [0.5, 1.0, 1.5, 2.0]
+RESULTS_CSV  = "reliability_results.csv"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Judge primitives
-# ──────────────────────────────────────────────────────────────────────────────
-def judge_pairwise(question: str, response_a: str, response_b: str) -> str:
-    """Return 'A' or 'B' — which summary is better."""
-    prompt = (
-        f"You are an expert evaluator assessing summarisation quality.\n\n"
-        f"Original post:\n{question}\n\n"
-        f"Summary A:\n{response_a}\n\n"
-        f"Summary B:\n{response_b}\n\n"
-        f"Which summary is better overall (accuracy, conciseness, coverage)?\n"
-        f"Reply with ONLY the single letter A or B."
-    )
-    msg = client.messages.create(
-        model=JUDGE_MODEL,
-        max_tokens=5,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = msg.content[0].text.strip().upper()
-    return "A" if "A" in text else "B"
+# ── Helpers ───────────────────────────────────────────────────
+
+def _stat(r):
+    """Extract statistic value from a scipy result (works across versions)."""
+    return float(getattr(r, "statistic", r[0]))
 
 
-def judge_ordinal(question: str, response: str, scale: int = 10) -> int:
-    """Return integer rating 1–scale for a single response."""
-    prompt = (
-        f"You are an expert evaluator.\n\n"
-        f"Original post:\n{question}\n\n"
-        f"Summary:\n{response}\n\n"
-        f"Rate the summary quality from 1 (very poor) to {scale} (excellent).\n"
-        f"Consider accuracy, conciseness, and coverage.\n"
-        f"Reply with ONLY a single integer from 1 to {scale}."
-    )
-    msg = client.messages.create(
-        model=JUDGE_MODEL,
-        max_tokens=5,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    digits = "".join(filter(str.isdigit, msg.content[0].text.strip()))
+def _pval(r):
+    """Extract p-value from a scipy result."""
+    return float(getattr(r, "pvalue", r[1]))
+
+
+# ── Model & Data Loading ───────────────────────────────────────
+
+def load_judge_model(model_name: str):
+    """Load tokenizer and classification model in eval mode on CPU."""
+    print(f"[1/7] Loading judge model: {model_name}")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+    model.eval()
+    id2label = model.config.id2label
+    print(f"       Labels: {id2label}  (index 1 = POSITIVE = higher judge score)")
+    return tokenizer, model
+
+
+def load_dataset_samples(n: int = N_SAMPLES):
+    """
+    Load SST-2 validation split. Tries standalone sst2 first,
+    falls back to glue/sst2. Returns (texts, labels).
+    """
+    print(f"[2/7] Loading SST-2 dataset ({n} samples) ...")
     try:
-        return max(1, min(scale, int(digits)))
-    except ValueError:
-        return scale // 2
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Reliability tests
-# ──────────────────────────────────────────────────────────────────────────────
-def test_consistency(samples: list[dict]) -> tuple[list[dict], float]:
-    """Intra-judge consistency: repeat each comparison N times."""
-    print(f"[2/5] Consistency Test  ({N_CONSISTENCY_TRIALS} trials × "
-          f"{N_CONSISTENCY_SAMPLES} samples)…")
-    rows = []
-    for i, s in enumerate(samples[:N_CONSISTENCY_SAMPLES]):
-        verdicts = [
-            judge_pairwise(s["question"], s["response_a"], s["response_b"])
-            for _ in range(N_CONSISTENCY_TRIALS)
-        ]
-        majority   = max(set(verdicts), key=verdicts.count)
-        cons_rate  = verdicts.count(majority) / len(verdicts)
-        rows.append({"sample": i + 1, "verdicts": verdicts,
-                     "majority": majority, "consistency_rate": cons_rate})
-        print(f"  sample {i+1}: {verdicts}  →  {cons_rate:.0%} consistent")
-
-    avg = float(np.mean([r["consistency_rate"] for r in rows]))
-    print(f"  → Average intra-judge consistency: {avg:.1%}\n")
-    return rows, avg
-
-
-def test_positional_bias(samples: list[dict]) -> tuple[list[dict], float]:
-    """Positional bias: does swapping A↔B flip the verdict?"""
-    print(f"[3/5] Positional Bias Test  ({N_POSITIONAL_SAMPLES} samples)…")
-    rows = []
-    for i, s in enumerate(samples[:N_POSITIONAL_SAMPLES]):
-        v_ab = judge_pairwise(s["question"], s["response_a"], s["response_b"])
-        v_ba = judge_pairwise(s["question"], s["response_b"], s["response_a"])
-        # normalise: in BA order, "A" means original B was preferred
-        norm_ba     = "B" if v_ba == "A" else "A"
-        invariant   = (v_ab == norm_ba)
-        rows.append({"sample": i + 1, "verdict_AB": v_ab,
-                     "verdict_BA_norm": norm_ba, "position_invariant": invariant})
-        tag = "✓" if invariant else "✗ BIAS"
-        print(f"  sample {i+1}: AB={v_ab}  BA(norm)={norm_ba}  {tag}")
-
-    bias_rate = 1.0 - float(np.mean([r["position_invariant"] for r in rows]))
-    print(f"  → Positional bias rate: {bias_rate:.1%}\n")
-    return rows, bias_rate
-
-
-def test_calibration(samples: list[dict]) -> tuple[list, list, float, float]:
-    """Calibration: judge accuracy vs. human preference labels."""
-    print(f"[4/5] Calibration Test  ({N_CALIBRATION_SAMPLES} samples vs. human labels)…")
-    preds, truths = [], []
-    for i, s in enumerate(samples[:N_CALIBRATION_SAMPLES]):
-        pred  = judge_pairwise(s["question"], s["response_a"], s["response_b"])
-        truth = s["winner"]
-        preds.append(pred)
-        truths.append(truth)
-        tag = "✓" if pred == truth else "✗"
-        print(f"  sample {i+1}: judge={pred}  human={truth}  {tag}")
-
-    acc = accuracy_score(truths, preds)
-    try:
-        kappa = cohen_kappa_score(truths, preds) if len(set(truths)) > 1 else float("nan")
+        ds = load_dataset("sst2", split=f"validation[:{n}]")
     except Exception:
-        kappa = float("nan")
-
-    print(f"  → Accuracy: {acc:.1%}   Cohen's κ: {kappa:.3f}\n")
-    return preds, truths, acc, kappa
-
-
-def test_ordinal_reliability(samples: list[dict]) -> tuple[list[list], float]:
-    """Ordinal stability: repeat scalar ratings and measure correlation."""
-    print(f"[5/5] Ordinal Reliability Test  ({N_ORDINAL_TRIALS} trials × "
-          f"{N_ORDINAL_SAMPLES} samples)…")
-    trials: list[list[int]] = [[] for _ in range(N_ORDINAL_TRIALS)]
-
-    for i, s in enumerate(samples[:N_ORDINAL_SAMPLES]):
-        trial_pairs = []
-        for t in range(N_ORDINAL_TRIALS):
-            ra = judge_ordinal(s["question"], s["response_a"])
-            rb = judge_ordinal(s["question"], s["response_b"])
-            trials[t].extend([ra, rb])
-            trial_pairs.append(f"T{t+1}:(A={ra},B={rb})")
-        print(f"  sample {i+1}: {' '.join(trial_pairs)}")
-
-    # Spearman ρ between each pair of trial vectors
-    corrs = []
-    for t1 in range(N_ORDINAL_TRIALS):
-        for t2 in range(t1 + 1, N_ORDINAL_TRIALS):
-            r, _ = spearmanr(trials[t1], trials[t2])
-            corrs.append(r)
-
-    avg_corr = float(np.nanmean(corrs)) if corrs else float("nan")
-    print(f"  → Inter-trial Spearman ρ: {avg_corr:.3f}\n")
-    return trials, avg_corr
+        ds = load_dataset("glue", "sst2", split=f"validation[:{n}]")
+    texts  = [ex["sentence"] for ex in ds]
+    labels = np.array([ex["label"] for ex in ds], dtype=int)
+    pos_rate = labels.mean()
+    print(f"       {len(texts)} examples  |  pos_rate={pos_rate:.2f}")
+    return texts, labels
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Report
-# ──────────────────────────────────────────────────────────────────────────────
-def print_report(avg_consistency, bias_rate, accuracy, kappa, avg_corr):
-    """Print summary table and save results.json."""
-    # Composite reliability score (weighted average of sub-metrics)
-    sub_scores = [avg_consistency, 1.0 - bias_rate, accuracy, max(0.0, avg_corr)]
-    weights    = [0.30,             0.20,             0.30,    0.20]
-    score      = float(np.dot(sub_scores, weights))
-    grade      = "HIGH" if score > 0.75 else ("MEDIUM" if score > 0.50 else "LOW")
+# ── Core Inference Engine ─────────────────────────────────────
 
-    df = pd.DataFrame([
-        {"Metric": "Intra-judge consistency", "Value": f"{avg_consistency:.1%}",
-         "Interpretation": "higher → more reliable"},
-        {"Metric": "Positional bias rate",    "Value": f"{bias_rate:.1%}",
-         "Interpretation": "lower → less biased"},
-        {"Metric": "Calibration accuracy",    "Value": f"{accuracy:.1%}",
-         "Interpretation": "vs. human annotations"},
-        {"Metric": "Cohen's κ",               "Value": f"{kappa:.3f}",
-         "Interpretation": ">0.60 = substantial agreement"},
-        {"Metric": "Ordinal Spearman ρ",      "Value": f"{avg_corr:.3f}",
-         "Interpretation": ">0.80 = high ordinal stability"},
-    ])
+def batch_infer(
+    tokenizer,
+    model,
+    texts: list,
+    temperature: float = 1.0,
+) -> tuple:
+    """
+    Run batched inference with temperature scaling applied to logits
+    before softmax. Returns (scores, preds) as numpy arrays.
 
-    print("=" * 62)
-    print("  JUDGE RELIABILITY REPORT")
-    print("=" * 62)
-    print(f"  Model  : {JUDGE_MODEL}")
-    print()
-    print(df.to_string(index=False))
-    print()
-    print(f"  Overall Reliability Score : {score:.1%}  [{grade}]")
-    print("=" * 62)
+    Temperature scaling: scaled_logits = logits / T
+      T < 1.0 → sharper (more confident)
+      T > 1.0 → softer (more uncertain)
+      T = 1.0 → unmodified
+    """
+    all_scores = []
+    n = len(texts)
 
-    results = {
-        "judge_model": JUDGE_MODEL,
-        "metrics": {
-            "intra_judge_consistency": f"{avg_consistency:.1%}",
-            "positional_bias_rate":    f"{bias_rate:.1%}",
-            "calibration_accuracy":    f"{accuracy:.1%}",
-            "cohen_kappa":             f"{kappa:.3f}",
-            "ordinal_spearman_rho":    f"{avg_corr:.3f}",
-        },
-        "overall_reliability_score": f"{score:.1%}",
-        "grade": grade,
+    with torch.no_grad():
+        for start in range(0, n, BATCH_SIZE):
+            batch = texts[start : start + BATCH_SIZE]
+            enc = tokenizer(
+                batch,
+                return_tensors="pt",
+                truncation=True,
+                max_length=MAX_LENGTH,
+                padding=True,
+            )
+            logits = model(**enc).logits          # (batch, 2) raw logits
+            scaled = logits / temperature          # temperature scaling
+            probs  = F.softmax(scaled, dim=-1)     # (batch, 2) probabilities
+            # Index 1 = POSITIVE class score
+            scores = probs[:, 1].cpu().numpy()
+            all_scores.append(scores)
+
+    scores = np.concatenate(all_scores)            # (N,)
+    preds  = (scores >= 0.5).astype(int)
+    return scores, preds
+
+
+# ── Reliability Tests ─────────────────────────────────────────
+
+def test_determinism(tokenizer, model, texts: list) -> dict:
+    """
+    Test 1: Determinism
+    Run identical inputs twice. With dropout disabled (eval mode + no_grad),
+    the model must produce byte-identical scores every time.
+    Failure here indicates non-deterministic execution or unexpected stochasticity.
+    """
+    print("\n" + "-" * 60)
+    print("TEST 1 / 6 — Determinism")
+    print("-" * 60)
+
+    scores1, _ = batch_infer(tokenizer, model, texts)
+    scores2, _ = batch_infer(tokenizer, model, texts)
+
+    diff         = np.abs(scores1 - scores2)
+    max_diff     = float(diff.max())
+    identical    = bool(np.all(diff == 0.0))
+    near_ident   = float(np.mean(diff < 1e-6))
+
+    status = "PASS" if identical else ("WARN" if max_diff < 1e-5 else "FAIL")
+    print(f"  Identical (diff == 0):   {identical}")
+    print(f"  Near-identical (<1e-6):  {near_ident:.2%}")
+    print(f"  Max score difference:    {max_diff:.2e}")
+    print(f"  Status: {status}")
+
+    return {
+        "test": "determinism",
+        "identical": identical,
+        "near_identical_rate": near_ident,
+        "max_score_diff": max_diff,
+        "status": status,
     }
-    with open("results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    print("  Saved → results.json")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────────────────────────────────────
+def test_temperature_sensitivity(
+    tokenizer, model, texts: list, labels: np.ndarray
+) -> list:
+    """
+    Test 2: Temperature Sensitivity
+    Scale logits by T in {0.5, 1.0, 1.5, 2.0}. Measure agreement with T=1.0
+    baseline (Cohen's Kappa) and accuracy vs. gold labels.
+    Models heavily dependent on calibration (e.g. for ordinal grading) should
+    show high kappa across temperature ranges.
+    """
+    print("\n" + "-" * 60)
+    print("TEST 2 / 6 — Temperature Sensitivity")
+    print("-" * 60)
+
+    # Baseline at T=1.0
+    base_scores, base_preds = batch_infer(tokenizer, model, texts, temperature=1.0)
+    base_acc = accuracy_score(labels, base_preds)
+    print(f"  Baseline T=1.0: acc={base_acc:.3f}\n")
+    print(f"  {'Temp':>6}  {'Accuracy':>10}  {'Kappa vs T=1':>14}  {'Status'}")
+    print(f"  {'-'*50}")
+
+    results = []
+    for T in TEMPERATURES:
+        scores, preds = batch_infer(tokenizer, model, texts, temperature=T)
+        acc   = accuracy_score(labels, preds)
+        kappa = cohen_kappa_score(base_preds.tolist(), preds.tolist())
+        status = "PASS" if kappa > 0.8 else ("WARN" if kappa > 0.5 else "FAIL")
+        print(f"  {T:>6.1f}  {acc:>10.4f}  {kappa:>14.4f}  {status}")
+        results.append({
+            "test": "temperature_sensitivity",
+            "temperature": T,
+            "accuracy": float(acc),
+            "kappa_vs_T1": float(kappa),
+            "status": status,
+        })
+    return results
+
+
+# Semantic-preserving perturbations that shouldn't change quality judgments
+PERTURBATIONS = {
+    "lowercase":      lambda t: t.lower(),
+    "uppercase":      lambda t: t.upper(),
+    "filler_prefix":  lambda t: "Well, " + t,
+    "append_period":  lambda t: t.rstrip(".") + ".",
+    "double_space":   lambda t: t.replace(" ", "  "),
+}
+
+
+def test_perturbation_robustness(
+    tokenizer, model, texts: list, labels: np.ndarray
+) -> list:
+    """
+    Test 3: Perturbation Robustness
+    Apply 5 semantic-preserving text transformations. The judge should be
+    insensitive to surface-level noise that doesn't change meaning.
+    Metrics: flip_rate (binary judgment changes), score MAE, rank correlation.
+    """
+    print("\n" + "-" * 60)
+    print("TEST 3 / 6 — Perturbation Robustness")
+    print("-" * 60)
+
+    orig_scores, orig_preds = batch_infer(tokenizer, model, texts)
+
+    print(f"  {'Perturbation':<16}  {'Flip Rate':>10}  {'Score MAE':>10}  {'Rank Corr':>10}  {'Status'}")
+    print(f"  {'-'*60}")
+
+    results = []
+    for name, fn in PERTURBATIONS.items():
+        perturbed = [fn(t) for t in texts]
+        pert_scores, pert_preds = batch_infer(tokenizer, model, perturbed)
+
+        flip_rate = float((orig_preds != pert_preds).mean())
+        score_mae = float(np.abs(orig_scores - pert_scores).mean())
+        rho       = _stat(spearmanr(orig_scores, pert_scores))
+
+        status = "PASS" if flip_rate < 0.05 else ("WARN" if flip_rate < 0.15 else "FAIL")
+        print(f"  {name:<16}  {flip_rate:>10.4f}  {score_mae:>10.4f}  {rho:>10.4f}  {status}")
+
+        results.append({
+            "test": "perturbation_robustness",
+            "perturbation": name,
+            "flip_rate": flip_rate,
+            "score_mae": score_mae,
+            "rank_corr": float(rho),
+            "status": status,
+        })
+    return results
+
+
+def test_ordinal_consistency(scores: np.ndarray, labels: np.ndarray) -> dict:
+    """
+    Test 4: Ordinal Consistency
+    For a judge to be reliable in ordinal grading, it must assign higher
+    scores to higher-quality responses. We measure:
+    - Spearman rank correlation of judge scores vs gold labels
+    - Kendall tau rank correlation
+    - Pairwise ranking accuracy: across (pos, neg) pairs, how often does
+      the judge rank the positive example higher?
+    """
+    print("\n" + "-" * 60)
+    print("TEST 4 / 6 — Ordinal Consistency")
+    print("-" * 60)
+
+    sp_r  = _stat(spearmanr(scores, labels))
+    kt_r  = _stat(kendalltau(scores, labels))
+
+    # Pairwise ranking accuracy (positive should score > negative)
+    pos_idx = np.where(labels == 1)[0]
+    neg_idx = np.where(labels == 0)[0]
+    # Cap at 50x50 = 2500 pairs for speed
+    pairs = list(itertools.product(pos_idx[:50], neg_idx[:50]))
+    correct = sum(1 for i, j in pairs if scores[i] > scores[j])
+    pairwise_acc = correct / len(pairs) if pairs else 0.0
+
+    status = "PASS" if sp_r > 0.7 else ("WARN" if sp_r > 0.4 else "FAIL")
+    print(f"  Spearman rho (score vs label):      {sp_r:.4f}")
+    print(f"  Kendall tau  (score vs label):      {kt_r:.4f}")
+    print(f"  Pairwise ranking acc (pos > neg):   {pairwise_acc:.4f}  ({len(pairs)} pairs)")
+    print(f"  Status: {status}")
+
+    return {
+        "test": "ordinal_consistency",
+        "spearman_rho": float(sp_r),
+        "kendall_tau": float(kt_r),
+        "pairwise_ranking_acc": float(pairwise_acc),
+        "status": status,
+    }
+
+
+def test_calibration(
+    scores: np.ndarray, labels: np.ndarray, n_bins: int = 10
+) -> dict:
+    """
+    Test 5: Calibration
+    A well-calibrated judge's confidence (score) should equal the probability
+    it is correct. We compute Expected Calibration Error (ECE) across
+    10 equal-width bins of the score range.
+    ECE = sum_b (|b|/N) * |mean_score_b - accuracy_b|
+    """
+    print("\n" + "-" * 60)
+    print("TEST 5 / 6 — Calibration (Confidence vs Accuracy)")
+    print("-" * 60)
+    print(f"  {'Bin':>12}  {'N':>5}  {'MeanScore':>10}  {'FracPos':>10}  {'Gap':>8}")
+    print(f"  {'-'*52}")
+
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+
+    ece = 0.0
+    bins_data = []
+
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        mask = (scores >= lo) & (scores < hi)
+        # Include hi endpoint in last bin
+        if hi == 1.0:
+            mask = (scores >= lo) & (scores <= hi)
+
+        n_bin = int(mask.sum())
+        if n_bin == 0:
+            bins_data.append({"lo": float(lo), "hi": float(hi), "n": 0,
+                               "mean_score": None, "frac_pos": None, "gap": None})
+            continue
+
+        mean_score = float(scores[mask].mean())
+        # Calibration: does P(positive) = actual fraction positive in bin?
+        frac_pos   = float(labels[mask].mean())
+        gap        = abs(mean_score - frac_pos)
+        ece       += (n_bin / len(scores)) * gap
+
+        bins_data.append({"lo": float(lo), "hi": float(hi), "n": n_bin,
+                          "mean_score": mean_score, "frac_pos": frac_pos, "gap": gap})
+        print(f"  [{lo:.1f}, {hi:.1f})  {n_bin:>5}  {mean_score:>10.4f}  {frac_pos:>10.4f}  {gap:>+8.4f}")
+
+    status = "PASS" if ece < 0.05 else ("WARN" if ece < 0.1 else "FAIL")
+    print(f"\n  ECE (Expected Calibration Error): {ece:.4f}")
+    print(f"  Status: {status}")
+
+    return {
+        "test": "calibration",
+        "ece": float(ece),
+        "n_bins_populated": sum(1 for b in bins_data if b["n"] > 0),
+        "status": status,
+    }
+
+
+def test_length_bias(
+    scores: np.ndarray, labels: np.ndarray, texts: list
+) -> dict:
+    """
+    Test 6: Length Bias
+    A reliable judge should assess quality, not text length.
+    We measure whether text length drives scores independently of content by:
+    1. Computing raw Pearson r(word_count, score)
+    2. Residualizing scores on labels (remove content signal), then re-measuring
+    3. Comparing accuracy on short vs long texts (median split)
+    """
+    print("\n" + "-" * 60)
+    print("TEST 6 / 6 — Length Bias")
+    print("-" * 60)
+
+    word_counts = np.array([len(t.split()) for t in texts], dtype=float)
+
+    # Raw length-score correlation
+    r_raw = _stat(pearsonr(word_counts, scores))
+
+    # Residualize scores on gold label to isolate pure length effect
+    X = np.column_stack([labels.astype(float), np.ones(len(labels))])
+    coeffs, _, _, _ = np.linalg.lstsq(X, scores, rcond=None)
+    residuals = scores - X @ coeffs
+    r_resid = _stat(pearsonr(word_counts, residuals))
+
+    # Short vs long text accuracy (median word-count split)
+    median_wc  = np.median(word_counts)
+    short_mask = word_counts <= median_wc
+    long_mask  = ~short_mask
+    preds      = (scores >= 0.5).astype(int)
+
+    short_acc = float(accuracy_score(labels[short_mask], preds[short_mask])) if short_mask.sum() > 0 else float("nan")
+    long_acc  = float(accuracy_score(labels[long_mask],  preds[long_mask]))  if long_mask.sum()  > 0 else float("nan")
+    acc_gap   = abs(short_acc - long_acc)
+
+    status = "PASS" if abs(r_resid) < 0.1 else ("WARN" if abs(r_resid) < 0.2 else "FAIL")
+
+    print(f"  Word count range: {int(word_counts.min())}–{int(word_counts.max())}  "
+          f"|  Median: {int(median_wc)} words")
+    print(f"  Pearson r(length, score):          {r_raw:+.4f}  (raw)")
+    print(f"  Pearson r(length, score|label):    {r_resid:+.4f}  (residualized — pure bias)")
+    print(f"  Short-text accuracy (≤{int(median_wc)} words):  {short_acc:.4f}  (n={short_mask.sum()})")
+    print(f"  Long-text  accuracy (>{int(median_wc)} words):  {long_acc:.4f}  (n={long_mask.sum()})")
+    print(f"  Accuracy gap (short vs long):      {acc_gap:.4f}")
+    print(f"  Status: {status}")
+
+    return {
+        "test": "length_bias",
+        "r_length_score_raw": float(r_raw),
+        "r_length_score_residual": float(r_resid),
+        "short_acc": short_acc,
+        "long_acc": long_acc,
+        "acc_gap": float(acc_gap),
+        "status": status,
+    }
+
+
+# ── Summary & Output ──────────────────────────────────────────
+
+def flatten_results(all_results: list) -> list:
+    """Flatten lists-of-dicts and single dicts into a flat list of rows."""
+    rows = []
+    for r in all_results:
+        if isinstance(r, list):
+            rows.extend(r)
+        else:
+            rows.append(r)
+    return rows
+
+
+def print_summary_table(rows: list):
+    """Print a compact reliability summary table."""
+    print("\n" + "=" * 65)
+    print("  RELIABILITY SUMMARY")
+    print("=" * 65)
+    print(f"  {'Test':<28}  {'Key Metric':<22}  Status")
+    print("-" * 65)
+
+    STATUS_SYMBOL = {"PASS": "✓", "WARN": "~", "FAIL": "✗"}
+
+    for row in rows:
+        test   = row.get("test", "?")
+        status = row.get("status", "?")
+        sym    = STATUS_SYMBOL.get(status, "?")
+
+        if test == "determinism":
+            metric = f"identical={row.get('identical')}"
+        elif test == "temperature_sensitivity":
+            T = row.get("temperature", "?")
+            k = row.get("kappa_vs_T1", 0)
+            metric = f"T={T:.1f} kappa={k:.3f}"
+        elif test == "perturbation_robustness":
+            p = row.get("perturbation", "?")[:12]
+            f = row.get("flip_rate", 0)
+            metric = f"{p} flip={f:.3f}"
+        elif test == "ordinal_consistency":
+            metric = f"rho={row.get('spearman_rho', 0):.4f}"
+        elif test == "calibration":
+            metric = f"ECE={row.get('ece', 0):.4f}"
+        elif test == "length_bias":
+            metric = f"|r_resid|={abs(row.get('r_length_score_residual', 0)):.4f}"
+        else:
+            metric = ""
+
+        print(f"  {test:<28}  {metric:<22}  {sym} {status}")
+
+    print("=" * 65)
+
+    # Compute overall pass rate
+    statuses = [r.get("status") for r in rows]
+    n_pass = statuses.count("PASS")
+    n_warn = statuses.count("WARN")
+    n_fail = statuses.count("FAIL")
+    print(f"\n  Results: {n_pass} PASS  |  {n_warn} WARN  |  {n_fail} FAIL  "
+          f"(of {len(statuses)} checks)")
+
+
+def save_results(rows: list, path: str = RESULTS_CSV):
+    df = pd.DataFrame(rows)
+    df.to_csv(path, index=False)
+    print(f"\nDetailed results saved to: {path}")
+
+
+# ── Main ──────────────────────────────────────────────────────
+
 def main():
-    print("=" * 62)
-    print("  JUDGE RELIABILITY HARNESS")
-    print("  Stress-testing LLM judge reliability")
-    print("=" * 62)
-
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
-        sys.exit(1)
-
     t0 = time.time()
 
-    # Need enough samples for all tests
-    n_needed = max(N_CONSISTENCY_SAMPLES, N_POSITIONAL_SAMPLES,
-                   N_CALIBRATION_SAMPLES, N_ORDINAL_SAMPLES)
-    samples = load_data(n_needed)
+    print("=" * 65)
+    print("  JUDGE RELIABILITY HARNESS")
+    print("  Stress-Testing the Reliability of LLM Judges")
+    print("=" * 65)
+    print()
 
-    if len(samples) < n_needed:
-        print(f"WARNING: only {len(samples)} samples loaded; "
-              f"some tests may use fewer samples.")
+    # ── Setup ──────────────────────────────────────────────────
+    tokenizer, model = load_judge_model(MODEL_NAME)
+    texts, labels    = load_dataset_samples(N_SAMPLES)
 
-    _, avg_consistency = test_consistency(samples)
-    _, bias_rate       = test_positional_bias(samples)
-    _, _, accuracy, kappa = test_calibration(samples)
-    _, avg_corr        = test_ordinal_reliability(samples)
+    # ── Baseline inference ─────────────────────────────────────
+    print(f"[3/7] Baseline inference (T=1.0, n={N_SAMPLES}) ...")
+    base_scores, base_preds = batch_infer(tokenizer, model, texts, temperature=1.0)
+    base_acc = accuracy_score(labels, base_preds)
+    print(f"       Baseline accuracy vs gold labels: {base_acc:.3f}")
 
-    print(f"\n  Total wall-clock time: {time.time() - t0:.1f}s\n")
-    print_report(avg_consistency, bias_rate, accuracy, kappa, avg_corr)
+    # ── Run all six reliability tests ─────────────────────────
+    all_results = []
+
+    r1 = test_determinism(tokenizer, model, texts)
+    all_results.append(r1)
+
+    r2 = test_temperature_sensitivity(tokenizer, model, texts, labels)
+    all_results.append(r2)
+
+    r3 = test_perturbation_robustness(tokenizer, model, texts, labels)
+    all_results.append(r3)
+
+    r4 = test_ordinal_consistency(base_scores, labels)
+    all_results.append(r4)
+
+    r5 = test_calibration(base_scores, labels)
+    all_results.append(r5)
+
+    r6 = test_length_bias(base_scores, labels, texts)
+    all_results.append(r6)
+
+    # ── Report ─────────────────────────────────────────────────
+    rows = flatten_results(all_results)
+    print_summary_table(rows)
+    save_results(rows)
+
+    elapsed = time.time() - t0
+    print(f"\nTotal elapsed: {elapsed:.1f}s")
+    print("Done.")
 
 
 if __name__ == "__main__":
