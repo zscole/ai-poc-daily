@@ -1,4 +1,6 @@
 anthropic>=0.40.0
-numpy>=1.24.0
+datasets>=2.14.0
 pandas>=2.0.0
-scipy>=1.10.0
+numpy>=1.24.0
+scikit-learn>=1.3.0
+scipy>=1.11.0

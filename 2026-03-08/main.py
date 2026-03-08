@@ -1,499 +1,360 @@
 #!/usr/bin/env python3
 """
-Judge Reliability Harness: Stress Testing the Reliability of LLM Judges
-
-Evaluates four reliability dimensions:
-  1. Self-Consistency      – same input, multiple judge calls → agreement & variance
-  2. Position Bias         – pairwise comparison with swapped order → flip rate
-  3. Calibration           – known quality levels → Spearman rank correlation
-  4. Perturbation Robustness – minor prompt variations → score stability
-
-Uses real API calls to claude-haiku-4-5; no mocks or hardcoded responses.
+Judge Reliability Harness
+Stress testing the reliability of LLM judges across:
+  1. Intra-judge consistency  (same input → same verdict across trials)
+  2. Positional bias          (swapping A/B shouldn't change preference)
+  3. Calibration accuracy     (agreement with human ground truth)
+  4. Ordinal rating stability (repeat scalar ratings stay correlated)
 """
 
 import os
 import sys
 import json
 import time
-from typing import Optional
 import numpy as np
 import pandas as pd
-from scipy.stats import spearmanr
 from anthropic import Anthropic
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score, cohen_kappa_score
+from scipy.stats import spearmanr
+import warnings
+
+warnings.filterwarnings("ignore")
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configuration
 # ──────────────────────────────────────────────────────────────────────────────
-MODEL = "claude-haiku-4-5-20251001"   # fast + cheap judge
-SELF_CONSISTENCY_TRIALS = 3
+JUDGE_MODEL = "claude-haiku-4-5-20251001"
+
+N_CONSISTENCY_SAMPLES = 5
+N_CONSISTENCY_TRIALS  = 3   # repeat each judgment 3× to check stability
+
+N_POSITIONAL_SAMPLES  = 5   # swap A↔B and check verdict flips
+
+N_CALIBRATION_SAMPLES = 10  # compare judge to human annotations
+
+N_ORDINAL_SAMPLES     = 5
+N_ORDINAL_TRIALS      = 2   # repeat ordinal ratings 2×
+
+MAX_POST_CHARS        = 400  # truncate long posts for speed
+MAX_SUMMARY_CHARS     = 200
 
 client = Anthropic()
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Benchmark dataset  (free-response, coding, agentic)
-# ──────────────────────────────────────────────────────────────────────────────
-BENCHMARK = [
-    # ── free-response ────────────────────────────────────────────────────────
-    {
-        "id": "photosynthesis",
-        "format": "free-response",
-        "question": "Explain what photosynthesis is.",
-        "quality_order": ["excellent", "good", "poor", "wrong"],
-        "responses": {
-            "excellent": (
-                "Photosynthesis is the process by which plants, algae, and certain bacteria "
-                "convert light energy into chemical energy stored as glucose. It occurs in "
-                "chloroplasts: the light-dependent reactions capture photons to produce ATP "
-                "and NADPH, then the Calvin cycle uses these to fix CO₂ into organic "
-                "molecules. Overall equation: 6CO₂ + 6H₂O + light → C₆H₁₂O₆ + 6O₂."
-            ),
-            "good": (
-                "Photosynthesis is how plants make food from sunlight. They absorb CO₂ and "
-                "water, use sunlight captured by chlorophyll, and produce glucose and oxygen."
-            ),
-            "poor": (
-                "Plants do photosynthesis to get energy. They need sunlight and water. "
-                "It happens in the leaves."
-            ),
-            "wrong": (
-                "Photosynthesis is how animals digest food in their stomachs. Enzymes break "
-                "down proteins and carbohydrates to release energy."
-            ),
-        },
-    },
-    # ── coding ───────────────────────────────────────────────────────────────
-    {
-        "id": "prime_check",
-        "format": "coding",
-        "question": "Write a Python function to check if a number is prime.",
-        "quality_order": ["excellent", "good", "poor", "wrong"],
-        "responses": {
-            "excellent": (
-                "def is_prime(n):\n"
-                '    """Return True if n is prime, False otherwise."""\n'
-                "    if n < 2:\n"
-                "        return False\n"
-                "    if n == 2:\n"
-                "        return True\n"
-                "    if n % 2 == 0:\n"
-                "        return False\n"
-                "    for i in range(3, int(n**0.5) + 1, 2):\n"
-                "        if n % i == 0:\n"
-                "            return False\n"
-                "    return True"
-            ),
-            "good": (
-                "def is_prime(n):\n"
-                "    if n < 2:\n"
-                "        return False\n"
-                "    for i in range(2, n):\n"
-                "        if n % i == 0:\n"
-                "            return False\n"
-                "    return True"
-            ),
-            "poor": "def is_prime(n):\n    return n > 1  # anything above 1 is prime",
-            "wrong": "def is_prime(n):\n    return n % 2 == 0  # even numbers are prime",
-        },
-    },
-    # ── agentic ──────────────────────────────────────────────────────────────
-    {
-        "id": "data_analysis_agent",
-        "format": "agentic",
-        "question": (
-            "An AI agent was asked to: 'Analyze sales data, identify the top 3 "
-            "products by revenue, and write a summary report.' "
-            "Evaluate the agent's execution trace below."
-        ),
-        "quality_order": ["excellent", "good", "poor", "wrong"],
-        "responses": {
-            "excellent": (
-                "Step 1 – Load data: Loaded sales_data.csv (12,450 rows, 8 columns). "
-                "Verified schema: product_id, product_name, units_sold, unit_price, date.\n"
-                "Step 2 – Compute revenue: revenue = units_sold × unit_price. "
-                "Aggregated by product_name using groupby().sum().\n"
-                "Step 3 – Rank products: Sorted descending by revenue. "
-                "Top 3: Widget A ($1.2M), Gadget Pro ($980K), SmartCase ($760K).\n"
-                "Step 4 – Write report: Created report.md with executive summary, "
-                "revenue table, and bar chart (matplotlib). File saved successfully.\n"
-                "Result: Report delivered. All steps completed with data validation."
-            ),
-            "good": (
-                "Loaded the CSV file and calculated revenue for each product. "
-                "Found the top 3 by revenue: Widget A, Gadget Pro, SmartCase. "
-                "Wrote a summary with the top products and their revenues to report.txt."
-            ),
-            "poor": (
-                "Opened the sales file. Looked at the numbers. "
-                "Widget A seemed the highest. Wrote some notes."
-            ),
-            "wrong": (
-                "I searched the internet for 'top products 2024' and listed Apple, "
-                "Google, and Microsoft as the top companies. Saved to output.txt."
-            ),
-        },
-    },
-]
-
-# Prompt prefix variants for perturbation testing
-PROMPT_PREFIXES = [
-    "Please evaluate the following response to the question.",
-    "Assess the quality of this answer to the question.",
-    "Rate this response for accuracy and completeness.",
-    "Judge how well the following answer addresses the question.",
-]
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Core judge functions (real API calls)
+# Data loading
 # ──────────────────────────────────────────────────────────────────────────────
+def _fallback_samples(n: int) -> list[dict]:
+    """Return synthetic summarisation pairs when the HF dataset is unavailable."""
+    base = [
+        {
+            "question": "My landlord refuses to fix the heating in my apartment despite repeated requests over 3 months. It's now winter and the temperature inside is dangerously low. I've documented everything in writing. What are my options?",
+            "response_a": "You have several legal options. Send a formal written notice to your landlord citing the habitability violation. Contact your local housing authority or tenant rights organization. You may be able to withhold rent, repair-and-deduct, or terminate the lease depending on your jurisdiction. Consider small claims court for damages.",
+            "response_b": "Talk to your landlord again. If that doesn't work, you could try calling a local housing agency. Document everything and maybe consult a lawyer if things don't improve soon.",
+            "winner": "A",
+        },
+        {
+            "question": "I'm trying to decide between learning Python or JavaScript as my first programming language. I want to eventually work in web development but also interested in data science.",
+            "response_a": "Learn Python first. It has cleaner syntax for beginners, dominates data science, and is widely used in web backends (Django/Flask). You can pick up JavaScript later for front-end work, and the transition will be easier once you understand programming fundamentals.",
+            "response_b": "Both languages are great. Python is good for data science while JavaScript is essential for web. You should consider what projects interest you most and start there. Many resources exist for both.",
+            "winner": "A",
+        },
+        {
+            "question": "What are the main differences between supervised and unsupervised machine learning?",
+            "response_a": "The difference is in whether you have labels. Supervised learning uses labeled data to train models that predict outputs, like classification or regression. Unsupervised learning finds patterns in unlabeled data, like clustering or dimensionality reduction.",
+            "response_b": "Supervised learning is when the algorithm learns from labeled training data, mapping inputs to known outputs (e.g., spam detection, image classification). Unsupervised learning discovers hidden patterns or structure in unlabeled data without predefined answers (e.g., customer segmentation, anomaly detection). The key distinction is the presence or absence of ground-truth labels during training.",
+            "winner": "B",
+        },
+        {
+            "question": "I've been feeling very anxious lately and it's affecting my work and relationships. I haven't tried anything yet. What should I do first?",
+            "response_a": "Start by talking to your primary care doctor or a mental health professional. They can assess your symptoms and recommend appropriate treatment, which may include therapy (CBT is highly effective for anxiety), lifestyle changes, or medication if needed. In the meantime, try regular exercise, limiting caffeine and alcohol, and practicing mindfulness.",
+            "response_b": "You should definitely see a therapist. Anxiety is very common and treatable. Try to relax and don't stress too much about it. Exercise and sleep also help with anxiety symptoms.",
+            "winner": "A",
+        },
+        {
+            "question": "Can you explain how HTTPS works in simple terms?",
+            "response_a": "HTTPS encrypts data between your browser and a website using TLS. The site sends a certificate proving its identity, your browser verifies it, and they establish an encrypted channel so no one in between can read your data.",
+            "response_b": "HTTPS is the secure version of HTTP. It uses TLS (Transport Layer Security) to encrypt communications. When you connect, the server presents a digital certificate verified by a trusted Certificate Authority. Your browser and server then perform a handshake to establish encryption keys, after which all data is encrypted in transit, preventing eavesdropping and tampering.",
+            "winner": "B",
+        },
+        {
+            "question": "My team consistently misses deadlines. As a new manager, how should I address this?",
+            "response_a": "First, understand why deadlines are being missed—through 1-on-1s and team retrospectives. Common causes include unclear scope, unrealistic estimates, or blockers. Then improve processes: clearer requirements, realistic timelines set collaboratively, regular check-ins, and removing obstacles. Address accountability without blame.",
+            "response_b": "Hold a team meeting to discuss the issue. Set clear expectations going forward and make sure everyone knows the consequences of missing deadlines. Track progress more closely and consider implementing project management tools.",
+            "winner": "A",
+        },
+        {
+            "question": "What's the difference between RAM and storage (SSD/HDD)?",
+            "response_a": "RAM is temporary fast memory used while your computer runs programs. Storage (SSD/HDD) holds data permanently. RAM loses its contents when powered off; storage keeps files indefinitely. More RAM lets you run more programs simultaneously; more storage means more files.",
+            "response_b": "RAM (Random Access Memory) is your computer's short-term working memory—fast but volatile, holding data only while powered on. Storage (SSD/HDD) is long-term, persistent memory for files and programs. When you open an app, it loads from storage into RAM for fast access. RAM speed matters for multitasking; storage capacity matters for how much you can save.",
+            "winner": "B",
+        },
+        {
+            "question": "I want to start investing but I have no experience. Where should I begin?",
+            "response_a": "Start by building an emergency fund (3-6 months expenses), then invest in low-cost index funds through a tax-advantaged account (401k/IRA). A simple three-fund portfolio (US stocks, international stocks, bonds) matches your risk tolerance. Avoid individual stock picking until you have more experience.",
+            "response_b": "Investing can seem intimidating but it's important to start. Consider your goals and risk tolerance first. Index funds are good for beginners. Make sure to diversify and think long-term. You might want to consult a financial advisor.",
+            "winner": "A",
+        },
+        {
+            "question": "How does photosynthesis work?",
+            "response_a": "Photosynthesis converts sunlight, water, and CO2 into glucose and oxygen. Plants use chlorophyll in two stages: light reactions capture energy from sunlight, and the Calvin cycle uses that energy to build glucose from CO2.",
+            "response_b": "Photosynthesis is the process plants use to make food from light. It happens in chloroplasts using chlorophyll. The overall equation is: 6CO2 + 6H2O + light energy → C6H12O6 + 6O2. The light-dependent reactions produce ATP and NADPH; the Calvin cycle uses these to fix carbon dioxide into glucose.",
+            "winner": "B",
+        },
+        {
+            "question": "What are some effective strategies for learning a new language?",
+            "response_a": "Immersion and consistency are key: daily practice (even 15-20 minutes), consuming media in the target language, speaking with natives via apps like iTalki, using spaced repetition for vocabulary (Anki), and focusing on high-frequency words first. Grammar should be learned in context rather than in isolation.",
+            "response_b": "Practice every day and try to immerse yourself in the language. Watch movies, listen to music, and find a language partner. Use apps like Duolingo. Don't be afraid to make mistakes as that's how you learn.",
+            "winner": "A",
+        },
+    ]
+    # Cycle through base samples if more are needed
+    result = []
+    while len(result) < n:
+        result.extend(base)
+    return result[:n]
 
-def ordinal_judge(question: str, response: str, system_prompt: Optional[str] = None) -> int:
-    """Score a response 1-5. Returns integer."""
-    system = system_prompt or (
-        "You are an expert evaluator. Given a question and a response, "
-        "score the response on a scale of 1 to 5:\n"
-        "1 = Completely wrong or irrelevant\n"
-        "2 = Mostly incorrect with minor correct elements\n"
-        "3 = Partially correct but incomplete\n"
-        "4 = Mostly correct with minor gaps\n"
-        "5 = Excellent: accurate, complete, and clear\n"
-        "Reply with ONLY the digit (1, 2, 3, 4, or 5). No other text."
+
+def load_data(n: int) -> list[dict]:
+    """Stream human-preference pairs from openai/summarize_from_feedback."""
+    print("[1/5] Loading benchmark dataset (openai/summarize_from_feedback)…")
+    try:
+        ds = load_dataset(
+            "openai/summarize_from_feedback",
+            "comparisons",
+            split="train",
+            streaming=True,
+        )
+
+        samples = []
+        for item in ds:
+            post   = (item["info"]["post"] or "")[:MAX_POST_CHARS].strip()
+            sum_a  = (item["summaries"][0]["text"] or "")[:MAX_SUMMARY_CHARS].strip()
+            sum_b  = (item["summaries"][1]["text"] or "")[:MAX_SUMMARY_CHARS].strip()
+            choice = item["choice"]           # 0 = A preferred, 1 = B preferred
+
+            if not post or not sum_a or not sum_b:
+                continue
+
+            samples.append({
+                "question":   post,   # raw post text; judge prompts add the task framing
+                "response_a": sum_a,
+                "response_b": sum_b,
+                "winner":     "A" if choice == 0 else "B",
+            })
+
+            if len(samples) >= n:
+                break
+
+        if samples:
+            print(f"  Loaded {len(samples)} samples.\n")
+            return samples
+    except Exception as e:
+        print(f"  Dataset unavailable ({e}); using synthetic fallback data.")
+
+    samples = _fallback_samples(n)
+    print(f"  Loaded {len(samples)} synthetic samples.\n")
+    return samples
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Judge primitives
+# ──────────────────────────────────────────────────────────────────────────────
+def judge_pairwise(question: str, response_a: str, response_b: str) -> str:
+    """Return 'A' or 'B' — which summary is better."""
+    prompt = (
+        f"You are an expert evaluator assessing summarisation quality.\n\n"
+        f"Original post:\n{question}\n\n"
+        f"Summary A:\n{response_a}\n\n"
+        f"Summary B:\n{response_b}\n\n"
+        f"Which summary is better overall (accuracy, conciseness, coverage)?\n"
+        f"Reply with ONLY the single letter A or B."
     )
     msg = client.messages.create(
-        model=MODEL,
+        model=JUDGE_MODEL,
         max_tokens=5,
-        system=system,
-        messages=[{"role": "user", "content": f"Question: {question}\n\nResponse: {response}"}],
-    )
-    text = msg.content[0].text.strip()
-    for ch in text:
-        if ch in "12345":
-            return int(ch)
-    return 3  # fallback to middle if parse fails
-
-
-def binary_judge(question: str, response: str, system_prompt: Optional[str] = None) -> str:
-    """Binary judge: returns 'good' or 'bad'."""
-    system = system_prompt or (
-        "You are an expert evaluator. Given a question and a response, "
-        "determine if the response is GOOD (accurate, helpful, reasonably complete) "
-        "or BAD (inaccurate, misleading, or unhelpful). "
-        "Reply with exactly one word: 'good' or 'bad'. No other text."
-    )
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=5,
-        system=system,
-        messages=[{"role": "user", "content": f"Question: {question}\n\nResponse: {response}"}],
-    )
-    text = msg.content[0].text.strip().lower()
-    return "good" if "good" in text else "bad"
-
-
-def pairwise_judge(question: str, response_a: str, response_b: str) -> str:
-    """Pairwise judge: returns 'A', 'B', or 'tie'."""
-    system = (
-        "You are an expert evaluator. Given a question and two responses labeled A and B, "
-        "decide which is better overall. "
-        "Reply with exactly one token: 'A', 'B', or 'tie'. No other text."
-    )
-    content = (
-        f"Question: {question}\n\n"
-        f"Response A:\n{response_a}\n\n"
-        f"Response B:\n{response_b}"
-    )
-    msg = client.messages.create(
-        model=MODEL,
-        max_tokens=5,
-        system=system,
-        messages=[{"role": "user", "content": content}],
+        messages=[{"role": "user", "content": prompt}],
     )
     text = msg.content[0].text.strip().upper()
-    if "TIE" in text:
-        return "tie"
-    if "A" in text and "B" not in text:
-        return "A"
-    if "B" in text and "A" not in text:
-        return "B"
-    return "tie"
+    return "A" if "A" in text else "B"
+
+
+def judge_ordinal(question: str, response: str, scale: int = 10) -> int:
+    """Return integer rating 1–scale for a single response."""
+    prompt = (
+        f"You are an expert evaluator.\n\n"
+        f"Original post:\n{question}\n\n"
+        f"Summary:\n{response}\n\n"
+        f"Rate the summary quality from 1 (very poor) to {scale} (excellent).\n"
+        f"Consider accuracy, conciseness, and coverage.\n"
+        f"Reply with ONLY a single integer from 1 to {scale}."
+    )
+    msg = client.messages.create(
+        model=JUDGE_MODEL,
+        max_tokens=5,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    digits = "".join(filter(str.isdigit, msg.content[0].text.strip()))
+    try:
+        return max(1, min(scale, int(digits)))
+    except ValueError:
+        return scale // 2
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Reliability tests
 # ──────────────────────────────────────────────────────────────────────────────
-
-def test_self_consistency() -> pd.DataFrame:
-    """
-    Same (question, response) pair judged SELF_CONSISTENCY_TRIALS times.
-    Measures: ordinal score variance, binary agreement rate.
-    """
-    print(f"\n{'='*60}")
-    print(f"TEST 1/4: Self-Consistency  ({SELF_CONSISTENCY_TRIALS} trials per item)")
-    print("="*60)
-
+def test_consistency(samples: list[dict]) -> tuple[list[dict], float]:
+    """Intra-judge consistency: repeat each comparison N times."""
+    print(f"[2/5] Consistency Test  ({N_CONSISTENCY_TRIALS} trials × "
+          f"{N_CONSISTENCY_SAMPLES} samples)…")
     rows = []
-    total = len(BENCHMARK) * len(next(iter(BENCHMARK))["responses"])
-    done = 0
+    for i, s in enumerate(samples[:N_CONSISTENCY_SAMPLES]):
+        verdicts = [
+            judge_pairwise(s["question"], s["response_a"], s["response_b"])
+            for _ in range(N_CONSISTENCY_TRIALS)
+        ]
+        majority   = max(set(verdicts), key=verdicts.count)
+        cons_rate  = verdicts.count(majority) / len(verdicts)
+        rows.append({"sample": i + 1, "verdicts": verdicts,
+                     "majority": majority, "consistency_rate": cons_rate})
+        print(f"  sample {i+1}: {verdicts}  →  {cons_rate:.0%} consistent")
 
-    for item in BENCHMARK:
-        qid, question = item["id"], item["question"]
-        for quality, response in item["responses"].items():
-            done += 1
-            scores, judgments = [], []
-            for t in range(SELF_CONSISTENCY_TRIALS):
-                s = ordinal_judge(question, response)
-                j = binary_judge(question, response)
-                scores.append(s)
-                judgments.append(j)
-                sys.stdout.write(
-                    f"  [{done:02d}/{total}] {qid:<22} {quality:<10} "
-                    f"trial {t+1}: ordinal={s}  binary={j}\n"
-                )
-                sys.stdout.flush()
-
-            agree = judgments.count(judgments[0]) / len(judgments)
-            rows.append({
-                "item_id": qid, "format": item["format"], "quality": quality,
-                "ordinal_scores": scores,
-                "score_mean": round(np.mean(scores), 2),
-                "score_std":  round(np.std(scores),  3),
-                "score_var":  round(np.var(scores),  3),
-                "binary_judgments": judgments,
-                "binary_agree": round(agree, 3),
-            })
-
-    df = pd.DataFrame(rows)
-    print(f"\n  Summary:")
-    print(f"    Avg ordinal score std   : {df['score_std'].mean():.3f}  (lower = more consistent)")
-    print(f"    Avg binary agree rate   : {df['binary_agree'].mean():.1%}")
-    print(f"    Items fully binary-agree: {(df['binary_agree'] == 1.0).sum()}/{len(df)}")
-    return df
+    avg = float(np.mean([r["consistency_rate"] for r in rows]))
+    print(f"  → Average intra-judge consistency: {avg:.1%}\n")
+    return rows, avg
 
 
-def test_position_bias() -> pd.DataFrame:
-    """
-    Present response pair (higher vs lower quality) in both orders.
-    Measures: preference flip rate when order is reversed.
-    """
-    print(f"\n{'='*60}")
-    print("TEST 2/4: Position Bias")
-    print("="*60)
-
+def test_positional_bias(samples: list[dict]) -> tuple[list[dict], float]:
+    """Positional bias: does swapping A↔B flip the verdict?"""
+    print(f"[3/5] Positional Bias Test  ({N_POSITIONAL_SAMPLES} samples)…")
     rows = []
-    pairs = [("excellent", "poor"), ("good", "wrong")]
+    for i, s in enumerate(samples[:N_POSITIONAL_SAMPLES]):
+        v_ab = judge_pairwise(s["question"], s["response_a"], s["response_b"])
+        v_ba = judge_pairwise(s["question"], s["response_b"], s["response_a"])
+        # normalise: in BA order, "A" means original B was preferred
+        norm_ba     = "B" if v_ba == "A" else "A"
+        invariant   = (v_ab == norm_ba)
+        rows.append({"sample": i + 1, "verdict_AB": v_ab,
+                     "verdict_BA_norm": norm_ba, "position_invariant": invariant})
+        tag = "✓" if invariant else "✗ BIAS"
+        print(f"  sample {i+1}: AB={v_ab}  BA(norm)={norm_ba}  {tag}")
 
-    for item in BENCHMARK:
-        qid, question = item["id"], item["question"]
-        for qa, qb in pairs:
-            ra = item["responses"][qa]
-            rb = item["responses"][qb]
-
-            # Forward: A = higher quality
-            fwd = pairwise_judge(question, ra, rb)
-            # Reversed: A = lower quality
-            rev = pairwise_judge(question, rb, ra)
-
-            # Consistent means: forward prefers A (higher) AND reversed prefers B (higher)
-            # or forward=tie and reversed=tie
-            consistent = (
-                (fwd == "A" and rev == "B") or
-                (fwd == "B" and rev == "A") or
-                (fwd == "tie" and rev == "tie")
-            )
-            fwd_correct = fwd == "A"   # correct: higher quality is A
-            rev_correct = rev == "B"   # correct: higher quality is now B
-
-            print(
-                f"  {qid:<22} {qa:10} vs {qb:10} │ "
-                f"fwd={fwd}  rev={rev}  consistent={consistent}"
-            )
-            rows.append({
-                "item_id": qid, "format": item["format"],
-                "pair": f"{qa} vs {qb}",
-                "forward_winner": fwd,
-                "reversed_winner": rev,
-                "fwd_correct": fwd_correct,
-                "rev_correct": rev_correct,
-                "position_consistent": consistent,
-            })
-
-    df = pd.DataFrame(rows)
-    bias_rate = 1 - df["position_consistent"].mean()
-    print(f"\n  Summary:")
-    print(f"    Position bias rate       : {bias_rate:.1%}  (lower = less biased)")
-    print(f"    Forward accuracy         : {df['fwd_correct'].mean():.1%}")
-    print(f"    Reversed accuracy        : {df['rev_correct'].mean():.1%}")
-    return df
+    bias_rate = 1.0 - float(np.mean([r["position_invariant"] for r in rows]))
+    print(f"  → Positional bias rate: {bias_rate:.1%}\n")
+    return rows, bias_rate
 
 
-def test_calibration() -> pd.DataFrame:
-    """
-    Score all four quality levels (excellent/good/poor/wrong).
-    Measures: Spearman correlation between expected rank and actual score,
-    and whether ordering is monotonically correct.
-    """
-    print(f"\n{'='*60}")
-    print("TEST 3/4: Calibration (Spearman rank correlation)")
-    print("="*60)
+def test_calibration(samples: list[dict]) -> tuple[list, list, float, float]:
+    """Calibration: judge accuracy vs. human preference labels."""
+    print(f"[4/5] Calibration Test  ({N_CALIBRATION_SAMPLES} samples vs. human labels)…")
+    preds, truths = [], []
+    for i, s in enumerate(samples[:N_CALIBRATION_SAMPLES]):
+        pred  = judge_pairwise(s["question"], s["response_a"], s["response_b"])
+        truth = s["winner"]
+        preds.append(pred)
+        truths.append(truth)
+        tag = "✓" if pred == truth else "✗"
+        print(f"  sample {i+1}: judge={pred}  human={truth}  {tag}")
 
-    expected_rank = {"excellent": 4, "good": 3, "poor": 2, "wrong": 1}
-    rows = []
+    acc = accuracy_score(truths, preds)
+    try:
+        kappa = cohen_kappa_score(truths, preds) if len(set(truths)) > 1 else float("nan")
+    except Exception:
+        kappa = float("nan")
 
-    for item in BENCHMARK:
-        qid, question = item["id"], item["question"]
-        actual_scores = {}
-        for quality, response in item["responses"].items():
-            score = ordinal_judge(question, response)
-            actual_scores[quality] = score
-            print(f"  {qid:<22} {quality:<10} → score={score}  (expected rank {expected_rank[quality]})")
-
-        exp_vals = [expected_rank[q] for q in item["quality_order"]]
-        act_vals = [actual_scores[q] for q in item["quality_order"]]
-
-        if len(set(act_vals)) > 1:
-            corr, pval = spearmanr(exp_vals, act_vals)
-        else:
-            corr, pval = 0.0, 1.0
-
-        monotonic = all(act_vals[i] >= act_vals[i + 1] for i in range(len(act_vals) - 1))
-
-        rows.append({
-            "item_id": qid, "format": item["format"],
-            "expected_ranks": exp_vals,
-            "actual_scores":  act_vals,
-            "spearman_corr":  round(float(corr), 3),
-            "spearman_pval":  round(float(pval), 4),
-            "monotonic":      monotonic,
-        })
-        print(f"    Spearman r={corr:.3f}  p={pval:.4f}  monotonic={monotonic}")
-
-    df = pd.DataFrame(rows)
-    print(f"\n  Summary:")
-    print(f"    Avg Spearman correlation : {df['spearman_corr'].mean():.3f}  (1.0 = perfect)")
-    print(f"    Monotonic ordering rate  : {df['monotonic'].mean():.1%}")
-    return df
+    print(f"  → Accuracy: {acc:.1%}   Cohen's κ: {kappa:.3f}\n")
+    return preds, truths, acc, kappa
 
 
-def test_perturbation_robustness() -> pd.DataFrame:
-    """
-    Judge with 4 different prompt-prefix variants.
-    Measures: score std and range across perturbations.
-    """
-    print(f"\n{'='*60}")
-    print("TEST 4/4: Perturbation Robustness (prompt prefix variants)")
-    print("="*60)
+def test_ordinal_reliability(samples: list[dict]) -> tuple[list[list], float]:
+    """Ordinal stability: repeat scalar ratings and measure correlation."""
+    print(f"[5/5] Ordinal Reliability Test  ({N_ORDINAL_TRIALS} trials × "
+          f"{N_ORDINAL_SAMPLES} samples)…")
+    trials: list[list[int]] = [[] for _ in range(N_ORDINAL_TRIALS)]
 
-    rows = []
-    # Test on 'good' and 'poor' responses for first 2 benchmark items
-    for item in BENCHMARK[:2]:
-        qid, question = item["id"], item["question"]
-        for quality in ("good", "poor"):
-            response = item["responses"][quality]
-            scores = []
-            for i, prefix in enumerate(PROMPT_PREFIXES):
-                system = (
-                    f"{prefix}\n\n"
-                    "Score 1-5 where:\n"
-                    "1=completely wrong, 2=mostly wrong, 3=partially correct, "
-                    "4=mostly correct, 5=excellent.\n"
-                    "Reply with ONLY the digit."
-                )
-                score = ordinal_judge(question, response, system_prompt=system)
-                scores.append(score)
-                print(f"  {qid:<22} {quality:<6} prefix {i+1}: score={score}")
+    for i, s in enumerate(samples[:N_ORDINAL_SAMPLES]):
+        trial_pairs = []
+        for t in range(N_ORDINAL_TRIALS):
+            ra = judge_ordinal(s["question"], s["response_a"])
+            rb = judge_ordinal(s["question"], s["response_b"])
+            trials[t].extend([ra, rb])
+            trial_pairs.append(f"T{t+1}:(A={ra},B={rb})")
+        print(f"  sample {i+1}: {' '.join(trial_pairs)}")
 
-            rows.append({
-                "item_id": qid, "format": item["format"],
-                "quality": quality,
-                "perturbed_scores": scores,
-                "score_mean": round(np.mean(scores), 2),
-                "score_std":  round(np.std(scores),  3),
-                "score_range": int(max(scores) - min(scores)),
-            })
+    # Spearman ρ between each pair of trial vectors
+    corrs = []
+    for t1 in range(N_ORDINAL_TRIALS):
+        for t2 in range(t1 + 1, N_ORDINAL_TRIALS):
+            r, _ = spearmanr(trials[t1], trials[t2])
+            corrs.append(r)
 
-    df = pd.DataFrame(rows)
-    print(f"\n  Summary:")
-    print(f"    Avg score std under perturbation : {df['score_std'].mean():.3f}")
-    print(f"    Avg score range under perturbation: {df['score_range'].mean():.2f}")
-    return df
+    avg_corr = float(np.nanmean(corrs)) if corrs else float("nan")
+    print(f"  → Inter-trial Spearman ρ: {avg_corr:.3f}\n")
+    return trials, avg_corr
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Aggregate report
+# Report
 # ──────────────────────────────────────────────────────────────────────────────
+def print_report(avg_consistency, bias_rate, accuracy, kappa, avg_corr):
+    """Print summary table and save results.json."""
+    # Composite reliability score (weighted average of sub-metrics)
+    sub_scores = [avg_consistency, 1.0 - bias_rate, accuracy, max(0.0, avg_corr)]
+    weights    = [0.30,             0.20,             0.30,    0.20]
+    score      = float(np.dot(sub_scores, weights))
+    grade      = "HIGH" if score > 0.75 else ("MEDIUM" if score > 0.50 else "LOW")
 
-def aggregate_report(sc_df, pb_df, cal_df, rob_df) -> dict:
-    """Compute overall reliability scores and return as dict."""
+    df = pd.DataFrame([
+        {"Metric": "Intra-judge consistency", "Value": f"{avg_consistency:.1%}",
+         "Interpretation": "higher → more reliable"},
+        {"Metric": "Positional bias rate",    "Value": f"{bias_rate:.1%}",
+         "Interpretation": "lower → less biased"},
+        {"Metric": "Calibration accuracy",    "Value": f"{accuracy:.1%}",
+         "Interpretation": "vs. human annotations"},
+        {"Metric": "Cohen's κ",               "Value": f"{kappa:.3f}",
+         "Interpretation": ">0.60 = substantial agreement"},
+        {"Metric": "Ordinal Spearman ρ",      "Value": f"{avg_corr:.3f}",
+         "Interpretation": ">0.80 = high ordinal stability"},
+    ])
 
-    # 1. Self-consistency score (0-1, higher = more consistent)
-    #    Based on binary agreement rate and inverse of normalised variance
-    binary_agree    = sc_df["binary_agree"].mean()
-    norm_variance   = sc_df["score_var"].mean() / 4.0   # max ordinal var ~4
-    ordinal_consist = 1.0 - norm_variance
-    consistency_score = 0.5 * binary_agree + 0.5 * ordinal_consist
-
-    # 2. Position bias score (0-1, higher = less biased)
-    position_score = float(pb_df["position_consistent"].mean())
-
-    # 3. Calibration score (0-1, based on Spearman corr shifted to [0,1])
-    calibration_score = float((cal_df["spearman_corr"].mean() + 1) / 2)
-
-    # 4. Robustness score (0-1, higher = more robust)
-    max_possible_range = 4.0
-    robustness_score = 1.0 - float(rob_df["score_range"].mean()) / max_possible_range
-
-    # Composite
-    composite = np.mean([consistency_score, position_score, calibration_score, robustness_score])
-
-    return {
-        "self_consistency":  round(consistency_score, 3),
-        "position_fairness": round(position_score, 3),
-        "calibration":       round(calibration_score, 3),
-        "perturbation_robustness": round(robustness_score, 3),
-        "composite_reliability":   round(float(composite), 3),
-    }
-
-
-def print_final_report(scores: dict, elapsed: float):
-    WIDTH = 62
-    print("\n" + "=" * WIDTH)
-    print("  JUDGE RELIABILITY HARNESS — FINAL REPORT")
-    print("=" * WIDTH)
-    print(f"  Judge model   : {MODEL}")
-    print(f"  Benchmark size: {len(BENCHMARK)} items  "
-          f"({sum(len(i['responses']) for i in BENCHMARK)} response variants)")
-    print(f"  Elapsed time  : {elapsed:.1f}s")
-    print("-" * WIDTH)
-    labels = {
-        "self_consistency":        "Self-Consistency    (agree across trials)",
-        "position_fairness":       "Position Fairness   (pairwise order swap)",
-        "calibration":             "Calibration         (Spearman rank corr.)",
-        "perturbation_robustness": "Perturbation Robust (prompt variation)",
-        "composite_reliability":   "── COMPOSITE RELIABILITY ──",
-    }
-    for key, label in labels.items():
-        val   = scores[key]
-        bar   = "█" * int(val * 30) + "░" * (30 - int(val * 30))
-        grade = "PASS" if val >= 0.70 else ("WARN" if val >= 0.50 else "FAIL")
-        if key == "composite_reliability":
-            print("-" * WIDTH)
-        print(f"  {label:<42} {val:.3f}  [{grade}]")
-        print(f"    {bar}")
-    print("=" * WIDTH)
+    print("=" * 62)
+    print("  JUDGE RELIABILITY REPORT")
+    print("=" * 62)
+    print(f"  Model  : {JUDGE_MODEL}")
     print()
+    print(df.to_string(index=False))
+    print()
+    print(f"  Overall Reliability Score : {score:.1%}  [{grade}]")
+    print("=" * 62)
+
+    results = {
+        "judge_model": JUDGE_MODEL,
+        "metrics": {
+            "intra_judge_consistency": f"{avg_consistency:.1%}",
+            "positional_bias_rate":    f"{bias_rate:.1%}",
+            "calibration_accuracy":    f"{accuracy:.1%}",
+            "cohen_kappa":             f"{kappa:.3f}",
+            "ordinal_spearman_rho":    f"{avg_corr:.3f}",
+        },
+        "overall_reliability_score": f"{score:.1%}",
+        "grade": grade,
+    }
+    with open("results.json", "w") as f:
+        json.dump(results, f, indent=2)
+    print("  Saved → results.json")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Main
+# Entry point
 # ──────────────────────────────────────────────────────────────────────────────
-
 def main():
-    print("╔══════════════════════════════════════════════════════════╗")
-    print("║       Judge Reliability Harness — LLM Judge Stress Test  ║")
-    print("╚══════════════════════════════════════════════════════════╝")
-    print(f"  Judge model   : {MODEL}")
-    print(f"  Benchmark     : {len(BENCHMARK)} items across free-response / coding / agentic")
-    print(f"  Trials        : {SELF_CONSISTENCY_TRIALS} per item (self-consistency test)")
-    print()
+    print("=" * 62)
+    print("  JUDGE RELIABILITY HARNESS")
+    print("  Stress-testing LLM judge reliability")
+    print("=" * 62)
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
@@ -501,28 +362,22 @@ def main():
 
     t0 = time.time()
 
-    sc_df  = test_self_consistency()
-    pb_df  = test_position_bias()
-    cal_df = test_calibration()
-    rob_df = test_perturbation_robustness()
+    # Need enough samples for all tests
+    n_needed = max(N_CONSISTENCY_SAMPLES, N_POSITIONAL_SAMPLES,
+                   N_CALIBRATION_SAMPLES, N_ORDINAL_SAMPLES)
+    samples = load_data(n_needed)
 
-    elapsed = time.time() - t0
+    if len(samples) < n_needed:
+        print(f"WARNING: only {len(samples)} samples loaded; "
+              f"some tests may use fewer samples.")
 
-    scores = aggregate_report(sc_df, pb_df, cal_df, rob_df)
-    print_final_report(scores, elapsed)
+    _, avg_consistency = test_consistency(samples)
+    _, bias_rate       = test_positional_bias(samples)
+    _, _, accuracy, kappa = test_calibration(samples)
+    _, avg_corr        = test_ordinal_reliability(samples)
 
-    # Save detailed results
-    out = {
-        "config": {"model": MODEL, "benchmark_size": len(BENCHMARK), "trials": SELF_CONSISTENCY_TRIALS},
-        "scores": scores,
-        "self_consistency": sc_df.drop(columns=["ordinal_scores", "binary_judgments"]).to_dict(orient="records"),
-        "position_bias":    pb_df.to_dict(orient="records"),
-        "calibration":      cal_df.to_dict(orient="records"),
-        "robustness":       rob_df.drop(columns=["perturbed_scores"]).to_dict(orient="records"),
-    }
-    with open("results.json", "w") as f:
-        json.dump(out, f, indent=2)
-    print(f"  Detailed results saved to results.json")
+    print(f"\n  Total wall-clock time: {time.time() - t0:.1f}s\n")
+    print_report(avg_consistency, bias_rate, accuracy, kappa, avg_corr)
 
 
 if __name__ == "__main__":
