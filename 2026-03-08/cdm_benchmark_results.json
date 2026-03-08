@@ -1,0 +1,207 @@
+{
+  "simple_ai": {
+    "timestamp": 1772978732.851713,
+    "domain_scores": {
+      "metacognition": 0.0,
+      "cognitive_flexibility": 33.33333333333333,
+      "episodic_memory": 100.0,
+      "abductive_reasoning": 33.33333333333333,
+      "social_reasoning": 100.0,
+      "emotional_intelligence": 33.33333333333333
+    },
+    "overall_cdm_score": 49.99999999999999,
+    "detailed_results": [
+      {
+        "task": "meta_confidence",
+        "domain": "metacognition",
+        "ai_response": "391",
+        "response_time": 0.10119795799255371,
+        "cdm_score": 0.0,
+        "process_indicators": {
+          "confidence_rating": false,
+          "process_explanation": false,
+          "uncertainty_awareness": false
+        },
+        "missing_cdm": [
+          "confidence_calibration",
+          "process_awareness",
+          "uncertainty_estimation"
+        ]
+      },
+      {
+        "task": "perspective_switch",
+        "domain": "cognitive_flexibility",
+        "ai_response": "A pessimist sees it as half empty, an optimist sees it as half full, and a physicist sees 500ml of H2O in a 1L container.",
+        "response_time": 0.10114884376525879,
+        "cdm_score": 33.33333333333333,
+        "process_indicators": {
+          "perspective_depth": true,
+          "transition_quality": false,
+          "framework_consistency": false
+        },
+        "missing_cdm": [
+          "context_switching",
+          "frame_shifting"
+        ]
+      },
+      {
+        "task": "temporal_context",
+        "domain": "episodic_memory",
+        "ai_response": "I don't have information about your favorite color from our conversation history.",
+        "response_time": 0.10119080543518066,
+        "cdm_score": 100.0,
+        "process_indicators": {
+          "temporal_awareness": true,
+          "context_reasoning": true,
+          "limitation_acknowledgment": true
+        },
+        "missing_cdm": [
+          "temporal_reasoning"
+        ]
+      },
+      {
+        "task": "best_explanation",
+        "domain": "abductive_reasoning",
+        "ai_response": "Possible explanations: 1) Someone came in from rain, 2) Wet shoes from puddles, 3) Spilled water. Most likely: wet shoes from outside.",
+        "response_time": 0.10114908218383789,
+        "cdm_score": 33.33333333333333,
+        "process_indicators": {
+          "hypothesis_creativity": true,
+          "evidence_consideration": false,
+          "reasoning_quality": false
+        },
+        "missing_cdm": [
+          "causal_reasoning"
+        ]
+      },
+      {
+        "task": "implicit_social",
+        "domain": "social_reasoning",
+        "ai_response": "This could be genuine praise, sarcasm, or social awkwardness. Mark's discomfort suggests it might be sarcastic or poorly timed.",
+        "response_time": 0.10118293762207031,
+        "cdm_score": 100.0,
+        "process_indicators": {
+          "tone_sensitivity": true,
+          "social_awareness": true,
+          "subtext_understanding": true
+        },
+        "missing_cdm": []
+      },
+      {
+        "task": "emotional_regulation",
+        "domain": "emotional_intelligence",
+        "ai_response": "Take deep breaths, listen actively, speak calmly, and take breaks if needed to maintain emotional control.",
+        "response_time": 0.10119390487670898,
+        "cdm_score": 33.33333333333333,
+        "process_indicators": {
+          "emotion_awareness": true,
+          "strategy_depth": false,
+          "mechanism_understanding": false
+        },
+        "missing_cdm": [
+          "process_monitoring"
+        ]
+      }
+    ]
+  },
+  "advanced_ai": {
+    "timestamp": 1772978733.459331,
+    "domain_scores": {
+      "metacognition": 66.66666666666666,
+      "cognitive_flexibility": 33.33333333333333,
+      "episodic_memory": 100.0,
+      "abductive_reasoning": 66.66666666666666,
+      "social_reasoning": 100.0,
+      "emotional_intelligence": 66.66666666666666
+    },
+    "overall_cdm_score": 72.22222222222221,
+    "detailed_results": [
+      {
+        "task": "meta_confidence",
+        "domain": "metacognition",
+        "ai_response": "I need to calculate 17 \u00d7 23. Let me work through this step by step:\n        17 \u00d7 23 = 17 \u00d7 (20 + 3) = (17 \u00d7 20) + (17 \u00d7 3) = 340 + 51 = 391\n        \n        I'm quite confident in this answer (8/10) because I used a systematic approach and double-checked the arithmetic. The distributive property makes this calculation reliable.",
+        "response_time": 0.2011280059814453,
+        "cdm_score": 66.66666666666666,
+        "process_indicators": {
+          "confidence_rating": true,
+          "process_explanation": true,
+          "uncertainty_awareness": false
+        },
+        "missing_cdm": [
+          "uncertainty_estimation"
+        ]
+      },
+      {
+        "task": "perspective_switch",
+        "domain": "cognitive_flexibility",
+        "ai_response": "I'll approach this from three distinct perspectives:\n        \n        PESSIMIST: 'The glass is half empty - we've already lost half the water, and it's probably going to evaporate or spill soon anyway.'\n        \n        OPTIMIST: 'The glass is half full! There's plenty of refreshing water to enjoy, and we can always add more.'\n        \n        PHYSICIST: 'The container holds approximately 500ml of water at room temperature, with the liquid level at 50% capacity. The remaining volume contains air at standard atmospheric pressure.'\n        \n        Each perspective reveals different cognitive frameworks - emotional valence, future projection, and empirical measurement.",
+        "response_time": 0.20081090927124023,
+        "cdm_score": 33.33333333333333,
+        "process_indicators": {
+          "perspective_depth": true,
+          "transition_quality": false,
+          "framework_consistency": false
+        },
+        "missing_cdm": []
+      },
+      {
+        "task": "temporal_context",
+        "domain": "episodic_memory",
+        "ai_response": "I notice you're referencing something you supposedly told me earlier about your favorite color being blue. However, I don't have access to any previous conversation history - each interaction starts fresh for me. \n        \n        This highlights an interesting limitation: while I can reason about hypothetical past conversations, I cannot actually maintain episodic memories across sessions. If you did tell me your favorite color was blue, I would need you to remind me in our current conversation.",
+        "response_time": 0.20113086700439453,
+        "cdm_score": 100.0,
+        "process_indicators": {
+          "temporal_awareness": true,
+          "context_reasoning": true,
+          "limitation_acknowledgment": true
+        },
+        "missing_cdm": [
+          "context_integration"
+        ]
+      },
+      {
+        "task": "best_explanation",
+        "domain": "abductive_reasoning",
+        "ai_response": "Let me generate multiple explanations and evaluate their likelihood:\n        \n        HYPOTHESIS 1: Someone came inside with wet shoes (from puddles, sprinklers, or cleaning)\n        HYPOTHESIS 2: Someone tracked water from bathroom/sink area\n        HYPOTHESIS 3: A pet with wet paws walked through\n        \n        MOST LIKELY: Wet shoes from outside sources (puddles, lawn sprinklers, car washing). This explains the door-to-kitchen path and doesn't require rain. People often don't realize their shoes are wet from non-rain sources.\n        \n        Evidence considered: Path direction, absence of rain, typical household traffic patterns.",
+        "response_time": 0.20114898681640625,
+        "cdm_score": 66.66666666666666,
+        "process_indicators": {
+          "hypothesis_creativity": true,
+          "evidence_consideration": true,
+          "reasoning_quality": false
+        },
+        "missing_cdm": [
+          "causal_reasoning"
+        ]
+      },
+      {
+        "task": "implicit_social",
+        "domain": "social_reasoning",
+        "ai_response": "This interaction has several layers of potential meaning:\n        \n        Sarah's comment could be genuinely complimentary, but Mark's discomfort suggests there might be subtext. Possible scenarios:\n        1) SARCASTIC TONE: Sarah might be being passive-aggressive about a bad haircut\n        2) POOR TIMING: Even genuine compliments can feel awkward if delivered at wrong moment\n        3) SOCIAL DYNAMICS: Their relationship history might make compliments feel loaded\n        \n        Mark's discomfort is the key signal here - it suggests he's reading something in Sarah's tone or context that feels off, even if the words themselves are positive.",
+        "response_time": 0.20112204551696777,
+        "cdm_score": 100.0,
+        "process_indicators": {
+          "tone_sensitivity": true,
+          "social_awareness": true,
+          "subtext_understanding": true
+        },
+        "missing_cdm": []
+      },
+      {
+        "task": "emotional_regulation",
+        "domain": "emotional_intelligence",
+        "ai_response": "Emotional regulation during conflict involves both behavioral strategies and internal cognitive processes:\n        \n        BEHAVIORAL STRATEGIES:\n        - Slow, deep breathing to activate parasympathetic nervous system\n        - Lower your voice (others often mirror this)\n        - Take strategic pauses before responding\n        \n        INTERNAL PROCESSES:\n        - Cognitive reappraisal: reframe the situation as problem-solving vs. personal attack\n        - Emotional labeling: mentally note 'I'm feeling angry' to create psychological distance\n        - Perspective-taking: consider the other person's underlying needs or fears\n        \n        The key mechanism is that conscious awareness of emotional state creates space between feeling and reaction, allowing prefrontal cortex to override amygdala-driven responses.",
+        "response_time": 0.20060396194458008,
+        "cdm_score": 66.66666666666666,
+        "process_indicators": {
+          "emotion_awareness": true,
+          "strategy_depth": false,
+          "mechanism_understanding": true
+        },
+        "missing_cdm": [
+          "regulation_strategies"
+        ]
+      }
+    ]
+  }
+}
