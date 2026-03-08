@@ -1,470 +1,528 @@
 #!/usr/bin/env python3
 """
-NCTB-QA: Bangla Educational Question Answering POC
+Judge Reliability Harness: Stress Testing the Reliability of LLM Judges
 
-Demonstrates fine-tuning XLM-RoBERTa on Bangla QA data (BnQUAD / NCTB-QA)
-with support for unanswerable questions (SQuAD 2.0 style).
+Evaluates four reliability dimensions:
+  1. Self-Consistency      – same input, multiple judge calls → agreement & variance
+  2. Position Bias         – pairwise comparison with swapped order → flip rate
+  3. Calibration           – known quality levels → Spearman rank correlation
+  4. Perturbation Robustness – minor prompt variations → score stability
 
-Key contributions of NCTB-QA paper reproduced here:
-  - Extractive QA over Bangla educational texts
-  - Unanswerable question detection (null-answer threshold)
-  - Evaluation with Exact Match and F1 scores
+Uses real API calls to claude-haiku-4-5; no mocks or hardcoded responses.
 """
 
-import collections
-import json
 import os
 import sys
+import json
+import time
+from typing import Optional
 import numpy as np
 import pandas as pd
-import torch
-from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from scipy.stats import spearmanr
+from anthropic import Anthropic
 
-from datasets import load_dataset, Dataset, DatasetDict
-from transformers import (
-    AutoTokenizer,
-    AutoModelForQuestionAnswering,
-    default_data_collator,
-    get_linear_schedule_with_warmup,
-)
+# ──────────────────────────────────────────────────────────────────────────────
+# Configuration
+# ──────────────────────────────────────────────────────────────────────────────
+MODEL = "claude-haiku-4-5-20251001"   # fast + cheap judge
+SELF_CONSISTENCY_TRIALS = 3
 
-# ── Config ────────────────────────────────────────────────────────────────────
-MODEL_NAME   = "xlm-roberta-base"       # multilingual, handles Bangla well
-MAX_LENGTH   = 384
-DOC_STRIDE   = 128
-BATCH_SIZE   = 8
-NUM_EPOCHS   = 3
-TRAIN_LIMIT  = 300   # examples for a quick POC run
-EVAL_LIMIT   = 100
-LR           = 2e-5
-NULL_SCORE_DIFF_THRESHOLD = 0.0   # tune for unanswerable detection
+client = Anthropic()
 
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(f"Device: {DEVICE}")
+# ──────────────────────────────────────────────────────────────────────────────
+# Benchmark dataset  (free-response, coding, agentic)
+# ──────────────────────────────────────────────────────────────────────────────
+BENCHMARK = [
+    # ── free-response ────────────────────────────────────────────────────────
+    {
+        "id": "photosynthesis",
+        "format": "free-response",
+        "question": "Explain what photosynthesis is.",
+        "quality_order": ["excellent", "good", "poor", "wrong"],
+        "responses": {
+            "excellent": (
+                "Photosynthesis is the process by which plants, algae, and certain bacteria "
+                "convert light energy into chemical energy stored as glucose. It occurs in "
+                "chloroplasts: the light-dependent reactions capture photons to produce ATP "
+                "and NADPH, then the Calvin cycle uses these to fix CO₂ into organic "
+                "molecules. Overall equation: 6CO₂ + 6H₂O + light → C₆H₁₂O₆ + 6O₂."
+            ),
+            "good": (
+                "Photosynthesis is how plants make food from sunlight. They absorb CO₂ and "
+                "water, use sunlight captured by chlorophyll, and produce glucose and oxygen."
+            ),
+            "poor": (
+                "Plants do photosynthesis to get energy. They need sunlight and water. "
+                "It happens in the leaves."
+            ),
+            "wrong": (
+                "Photosynthesis is how animals digest food in their stomachs. Enzymes break "
+                "down proteins and carbohydrates to release energy."
+            ),
+        },
+    },
+    # ── coding ───────────────────────────────────────────────────────────────
+    {
+        "id": "prime_check",
+        "format": "coding",
+        "question": "Write a Python function to check if a number is prime.",
+        "quality_order": ["excellent", "good", "poor", "wrong"],
+        "responses": {
+            "excellent": (
+                "def is_prime(n):\n"
+                '    """Return True if n is prime, False otherwise."""\n'
+                "    if n < 2:\n"
+                "        return False\n"
+                "    if n == 2:\n"
+                "        return True\n"
+                "    if n % 2 == 0:\n"
+                "        return False\n"
+                "    for i in range(3, int(n**0.5) + 1, 2):\n"
+                "        if n % i == 0:\n"
+                "            return False\n"
+                "    return True"
+            ),
+            "good": (
+                "def is_prime(n):\n"
+                "    if n < 2:\n"
+                "        return False\n"
+                "    for i in range(2, n):\n"
+                "        if n % i == 0:\n"
+                "            return False\n"
+                "    return True"
+            ),
+            "poor": "def is_prime(n):\n    return n > 1  # anything above 1 is prime",
+            "wrong": "def is_prime(n):\n    return n % 2 == 0  # even numbers are prime",
+        },
+    },
+    # ── agentic ──────────────────────────────────────────────────────────────
+    {
+        "id": "data_analysis_agent",
+        "format": "agentic",
+        "question": (
+            "An AI agent was asked to: 'Analyze sales data, identify the top 3 "
+            "products by revenue, and write a summary report.' "
+            "Evaluate the agent's execution trace below."
+        ),
+        "quality_order": ["excellent", "good", "poor", "wrong"],
+        "responses": {
+            "excellent": (
+                "Step 1 – Load data: Loaded sales_data.csv (12,450 rows, 8 columns). "
+                "Verified schema: product_id, product_name, units_sold, unit_price, date.\n"
+                "Step 2 – Compute revenue: revenue = units_sold × unit_price. "
+                "Aggregated by product_name using groupby().sum().\n"
+                "Step 3 – Rank products: Sorted descending by revenue. "
+                "Top 3: Widget A ($1.2M), Gadget Pro ($980K), SmartCase ($760K).\n"
+                "Step 4 – Write report: Created report.md with executive summary, "
+                "revenue table, and bar chart (matplotlib). File saved successfully.\n"
+                "Result: Report delivered. All steps completed with data validation."
+            ),
+            "good": (
+                "Loaded the CSV file and calculated revenue for each product. "
+                "Found the top 3 by revenue: Widget A, Gadget Pro, SmartCase. "
+                "Wrote a summary with the top products and their revenues to report.txt."
+            ),
+            "poor": (
+                "Opened the sales file. Looked at the numbers. "
+                "Widget A seemed the highest. Wrote some notes."
+            ),
+            "wrong": (
+                "I searched the internet for 'top products 2024' and listed Apple, "
+                "Google, and Microsoft as the top companies. Saved to output.txt."
+            ),
+        },
+    },
+]
+
+# Prompt prefix variants for perturbation testing
+PROMPT_PREFIXES = [
+    "Please evaluate the following response to the question.",
+    "Assess the quality of this answer to the question.",
+    "Rate this response for accuracy and completeness.",
+    "Judge how well the following answer addresses the question.",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Core judge functions (real API calls)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def ordinal_judge(question: str, response: str, system_prompt: Optional[str] = None) -> int:
+    """Score a response 1-5. Returns integer."""
+    system = system_prompt or (
+        "You are an expert evaluator. Given a question and a response, "
+        "score the response on a scale of 1 to 5:\n"
+        "1 = Completely wrong or irrelevant\n"
+        "2 = Mostly incorrect with minor correct elements\n"
+        "3 = Partially correct but incomplete\n"
+        "4 = Mostly correct with minor gaps\n"
+        "5 = Excellent: accurate, complete, and clear\n"
+        "Reply with ONLY the digit (1, 2, 3, 4, or 5). No other text."
+    )
+    msg = client.messages.create(
+        model=MODEL,
+        max_tokens=5,
+        system=system,
+        messages=[{"role": "user", "content": f"Question: {question}\n\nResponse: {response}"}],
+    )
+    text = msg.content[0].text.strip()
+    for ch in text:
+        if ch in "12345":
+            return int(ch)
+    return 3  # fallback to middle if parse fails
 
 
-# ── 1. Data loading ────────────────────────────────────────────────────────────
-
-def load_bangla_qa() -> DatasetDict:
-    """Load a real Bangla QA dataset. Try NCTB-QA, fall back to BnQUAD."""
-    candidates = [
-        ("Tahsin-Mayeesha/nctb-qa",   "NCTB-QA"),
-        ("csebuetnlp/bnquad",          "BnQUAD"),
-    ]
-    for repo, name in candidates:
-        try:
-            print(f"Trying to load {name} ({repo}) …")
-            ds = load_dataset(repo, trust_remote_code=True)
-            print(f"✓ Loaded {name}: {ds}")
-            return ds, name
-        except Exception as e:
-            print(f"  ✗ {e}")
-
-    raise RuntimeError("Could not load any Bangla QA dataset. Check internet / HuggingFace.")
+def binary_judge(question: str, response: str, system_prompt: Optional[str] = None) -> str:
+    """Binary judge: returns 'good' or 'bad'."""
+    system = system_prompt or (
+        "You are an expert evaluator. Given a question and a response, "
+        "determine if the response is GOOD (accurate, helpful, reasonably complete) "
+        "or BAD (inaccurate, misleading, or unhelpful). "
+        "Reply with exactly one word: 'good' or 'bad'. No other text."
+    )
+    msg = client.messages.create(
+        model=MODEL,
+        max_tokens=5,
+        system=system,
+        messages=[{"role": "user", "content": f"Question: {question}\n\nResponse: {response}"}],
+    )
+    text = msg.content[0].text.strip().lower()
+    return "good" if "good" in text else "bad"
 
 
-def normalise_squad_example(ex: dict) -> dict:
-    """Ensure each example has the SQuAD 2.0 fields we need."""
-    # BnQUAD uses 'answers' as {'text': [...], 'answer_start': [...]}
-    answers = ex.get("answers", {})
-    if isinstance(answers, dict):
-        texts   = answers.get("text",         answers.get("answer_text", []))
-        starts  = answers.get("answer_start",  answers.get("answer_start_token", []))
-    else:
-        texts, starts = [], []
+def pairwise_judge(question: str, response_a: str, response_b: str) -> str:
+    """Pairwise judge: returns 'A', 'B', or 'tie'."""
+    system = (
+        "You are an expert evaluator. Given a question and two responses labeled A and B, "
+        "decide which is better overall. "
+        "Reply with exactly one token: 'A', 'B', or 'tie'. No other text."
+    )
+    content = (
+        f"Question: {question}\n\n"
+        f"Response A:\n{response_a}\n\n"
+        f"Response B:\n{response_b}"
+    )
+    msg = client.messages.create(
+        model=MODEL,
+        max_tokens=5,
+        system=system,
+        messages=[{"role": "user", "content": content}],
+    )
+    text = msg.content[0].text.strip().upper()
+    if "TIE" in text:
+        return "tie"
+    if "A" in text and "B" not in text:
+        return "A"
+    if "B" in text and "A" not in text:
+        return "B"
+    return "tie"
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Reliability tests
+# ──────────────────────────────────────────────────────────────────────────────
+
+def test_self_consistency() -> pd.DataFrame:
+    """
+    Same (question, response) pair judged SELF_CONSISTENCY_TRIALS times.
+    Measures: ordinal score variance, binary agreement rate.
+    """
+    print(f"\n{'='*60}")
+    print(f"TEST 1/4: Self-Consistency  ({SELF_CONSISTENCY_TRIALS} trials per item)")
+    print("="*60)
+
+    rows = []
+    total = len(BENCHMARK) * len(next(iter(BENCHMARK))["responses"])
+    done = 0
+
+    for item in BENCHMARK:
+        qid, question = item["id"], item["question"]
+        for quality, response in item["responses"].items():
+            done += 1
+            scores, judgments = [], []
+            for t in range(SELF_CONSISTENCY_TRIALS):
+                s = ordinal_judge(question, response)
+                j = binary_judge(question, response)
+                scores.append(s)
+                judgments.append(j)
+                sys.stdout.write(
+                    f"  [{done:02d}/{total}] {qid:<22} {quality:<10} "
+                    f"trial {t+1}: ordinal={s}  binary={j}\n"
+                )
+                sys.stdout.flush()
+
+            agree = judgments.count(judgments[0]) / len(judgments)
+            rows.append({
+                "item_id": qid, "format": item["format"], "quality": quality,
+                "ordinal_scores": scores,
+                "score_mean": round(np.mean(scores), 2),
+                "score_std":  round(np.std(scores),  3),
+                "score_var":  round(np.var(scores),  3),
+                "binary_judgments": judgments,
+                "binary_agree": round(agree, 3),
+            })
+
+    df = pd.DataFrame(rows)
+    print(f"\n  Summary:")
+    print(f"    Avg ordinal score std   : {df['score_std'].mean():.3f}  (lower = more consistent)")
+    print(f"    Avg binary agree rate   : {df['binary_agree'].mean():.1%}")
+    print(f"    Items fully binary-agree: {(df['binary_agree'] == 1.0).sum()}/{len(df)}")
+    return df
+
+
+def test_position_bias() -> pd.DataFrame:
+    """
+    Present response pair (higher vs lower quality) in both orders.
+    Measures: preference flip rate when order is reversed.
+    """
+    print(f"\n{'='*60}")
+    print("TEST 2/4: Position Bias")
+    print("="*60)
+
+    rows = []
+    pairs = [("excellent", "poor"), ("good", "wrong")]
+
+    for item in BENCHMARK:
+        qid, question = item["id"], item["question"]
+        for qa, qb in pairs:
+            ra = item["responses"][qa]
+            rb = item["responses"][qb]
+
+            # Forward: A = higher quality
+            fwd = pairwise_judge(question, ra, rb)
+            # Reversed: A = lower quality
+            rev = pairwise_judge(question, rb, ra)
+
+            # Consistent means: forward prefers A (higher) AND reversed prefers B (higher)
+            # or forward=tie and reversed=tie
+            consistent = (
+                (fwd == "A" and rev == "B") or
+                (fwd == "B" and rev == "A") or
+                (fwd == "tie" and rev == "tie")
+            )
+            fwd_correct = fwd == "A"   # correct: higher quality is A
+            rev_correct = rev == "B"   # correct: higher quality is now B
+
+            print(
+                f"  {qid:<22} {qa:10} vs {qb:10} │ "
+                f"fwd={fwd}  rev={rev}  consistent={consistent}"
+            )
+            rows.append({
+                "item_id": qid, "format": item["format"],
+                "pair": f"{qa} vs {qb}",
+                "forward_winner": fwd,
+                "reversed_winner": rev,
+                "fwd_correct": fwd_correct,
+                "rev_correct": rev_correct,
+                "position_consistent": consistent,
+            })
+
+    df = pd.DataFrame(rows)
+    bias_rate = 1 - df["position_consistent"].mean()
+    print(f"\n  Summary:")
+    print(f"    Position bias rate       : {bias_rate:.1%}  (lower = less biased)")
+    print(f"    Forward accuracy         : {df['fwd_correct'].mean():.1%}")
+    print(f"    Reversed accuracy        : {df['rev_correct'].mean():.1%}")
+    return df
+
+
+def test_calibration() -> pd.DataFrame:
+    """
+    Score all four quality levels (excellent/good/poor/wrong).
+    Measures: Spearman correlation between expected rank and actual score,
+    and whether ordering is monotonically correct.
+    """
+    print(f"\n{'='*60}")
+    print("TEST 3/4: Calibration (Spearman rank correlation)")
+    print("="*60)
+
+    expected_rank = {"excellent": 4, "good": 3, "poor": 2, "wrong": 1}
+    rows = []
+
+    for item in BENCHMARK:
+        qid, question = item["id"], item["question"]
+        actual_scores = {}
+        for quality, response in item["responses"].items():
+            score = ordinal_judge(question, response)
+            actual_scores[quality] = score
+            print(f"  {qid:<22} {quality:<10} → score={score}  (expected rank {expected_rank[quality]})")
+
+        exp_vals = [expected_rank[q] for q in item["quality_order"]]
+        act_vals = [actual_scores[q] for q in item["quality_order"]]
+
+        if len(set(act_vals)) > 1:
+            corr, pval = spearmanr(exp_vals, act_vals)
+        else:
+            corr, pval = 0.0, 1.0
+
+        monotonic = all(act_vals[i] >= act_vals[i + 1] for i in range(len(act_vals) - 1))
+
+        rows.append({
+            "item_id": qid, "format": item["format"],
+            "expected_ranks": exp_vals,
+            "actual_scores":  act_vals,
+            "spearman_corr":  round(float(corr), 3),
+            "spearman_pval":  round(float(pval), 4),
+            "monotonic":      monotonic,
+        })
+        print(f"    Spearman r={corr:.3f}  p={pval:.4f}  monotonic={monotonic}")
+
+    df = pd.DataFrame(rows)
+    print(f"\n  Summary:")
+    print(f"    Avg Spearman correlation : {df['spearman_corr'].mean():.3f}  (1.0 = perfect)")
+    print(f"    Monotonic ordering rate  : {df['monotonic'].mean():.1%}")
+    return df
+
+
+def test_perturbation_robustness() -> pd.DataFrame:
+    """
+    Judge with 4 different prompt-prefix variants.
+    Measures: score std and range across perturbations.
+    """
+    print(f"\n{'='*60}")
+    print("TEST 4/4: Perturbation Robustness (prompt prefix variants)")
+    print("="*60)
+
+    rows = []
+    # Test on 'good' and 'poor' responses for first 2 benchmark items
+    for item in BENCHMARK[:2]:
+        qid, question = item["id"], item["question"]
+        for quality in ("good", "poor"):
+            response = item["responses"][quality]
+            scores = []
+            for i, prefix in enumerate(PROMPT_PREFIXES):
+                system = (
+                    f"{prefix}\n\n"
+                    "Score 1-5 where:\n"
+                    "1=completely wrong, 2=mostly wrong, 3=partially correct, "
+                    "4=mostly correct, 5=excellent.\n"
+                    "Reply with ONLY the digit."
+                )
+                score = ordinal_judge(question, response, system_prompt=system)
+                scores.append(score)
+                print(f"  {qid:<22} {quality:<6} prefix {i+1}: score={score}")
+
+            rows.append({
+                "item_id": qid, "format": item["format"],
+                "quality": quality,
+                "perturbed_scores": scores,
+                "score_mean": round(np.mean(scores), 2),
+                "score_std":  round(np.std(scores),  3),
+                "score_range": int(max(scores) - min(scores)),
+            })
+
+    df = pd.DataFrame(rows)
+    print(f"\n  Summary:")
+    print(f"    Avg score std under perturbation : {df['score_std'].mean():.3f}")
+    print(f"    Avg score range under perturbation: {df['score_range'].mean():.2f}")
+    return df
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Aggregate report
+# ──────────────────────────────────────────────────────────────────────────────
+
+def aggregate_report(sc_df, pb_df, cal_df, rob_df) -> dict:
+    """Compute overall reliability scores and return as dict."""
+
+    # 1. Self-consistency score (0-1, higher = more consistent)
+    #    Based on binary agreement rate and inverse of normalised variance
+    binary_agree    = sc_df["binary_agree"].mean()
+    norm_variance   = sc_df["score_var"].mean() / 4.0   # max ordinal var ~4
+    ordinal_consist = 1.0 - norm_variance
+    consistency_score = 0.5 * binary_agree + 0.5 * ordinal_consist
+
+    # 2. Position bias score (0-1, higher = less biased)
+    position_score = float(pb_df["position_consistent"].mean())
+
+    # 3. Calibration score (0-1, based on Spearman corr shifted to [0,1])
+    calibration_score = float((cal_df["spearman_corr"].mean() + 1) / 2)
+
+    # 4. Robustness score (0-1, higher = more robust)
+    max_possible_range = 4.0
+    robustness_score = 1.0 - float(rob_df["score_range"].mean()) / max_possible_range
+
+    # Composite
+    composite = np.mean([consistency_score, position_score, calibration_score, robustness_score])
 
     return {
-        "id":       str(ex.get("id", ex.get("qas_id", ""))),
-        "context":  ex.get("context", ex.get("passage", "")),
-        "question": ex.get("question", ""),
-        "answers":  {"text": texts, "answer_start": starts},
-        "is_impossible": len(texts) == 0,
+        "self_consistency":  round(consistency_score, 3),
+        "position_fairness": round(position_score, 3),
+        "calibration":       round(calibration_score, 3),
+        "perturbation_robustness": round(robustness_score, 3),
+        "composite_reliability":   round(float(composite), 3),
     }
 
 
-# ── 2. Tokenisation helpers ────────────────────────────────────────────────────
-
-def preprocess_train(examples, tokenizer):
-    """Tokenise training examples; map each token back to its answer span."""
-    questions = [q.lstrip() for q in examples["question"]]
-    inputs = tokenizer(
-        questions,
-        examples["context"],
-        max_length=MAX_LENGTH,
-        truncation="only_second",
-        stride=DOC_STRIDE,
-        return_overflowing_tokens=True,
-        return_offsets_mapping=True,
-        padding="max_length",
-    )
-
-    sample_map   = inputs.pop("overflow_to_sample_mapping")
-    offset_map   = inputs.pop("offset_mapping")
-
-    start_positions, end_positions = [], []
-
-    for i, offsets in enumerate(offset_map):
-        sample_idx  = sample_map[i]
-        answers     = examples["answers"][sample_idx]
-        cls_index   = inputs["input_ids"][i].index(tokenizer.cls_token_id)
-
-        seq_ids = inputs.sequence_ids(i)
-        ctx_start = next(j for j, s in enumerate(seq_ids) if s == 1)
-        ctx_end   = len(seq_ids) - 1 - next(
-            j for j, s in enumerate(reversed(seq_ids)) if s == 1
-        )
-
-        # Unanswerable
-        if len(answers["text"]) == 0:
-            start_positions.append(cls_index)
-            end_positions.append(cls_index)
-            continue
-
-        ans_start_char = answers["answer_start"][0]
-        ans_end_char   = ans_start_char + len(answers["text"][0])
-
-        # Answer falls outside this chunk → mark as unanswerable in this chunk
-        if (offsets[ctx_start][0] > ans_end_char or
-                offsets[ctx_end][1] < ans_start_char):
-            start_positions.append(cls_index)
-            end_positions.append(cls_index)
-        else:
-            # Walk to first token whose offset starts >= ans_start_char
-            tok_start = ctx_start
-            while tok_start <= ctx_end and offsets[tok_start][0] < ans_start_char:
-                tok_start += 1
-            tok_end = ctx_end
-            while tok_end >= ctx_start and offsets[tok_end][1] > ans_end_char:
-                tok_end -= 1
-            start_positions.append(tok_start)
-            end_positions.append(tok_end)
-
-    inputs["start_positions"] = start_positions
-    inputs["end_positions"]   = end_positions
-    return inputs
-
-
-def preprocess_eval(examples, tokenizer):
-    """Tokenise validation examples (keep offset map for answer extraction)."""
-    questions = [q.lstrip() for q in examples["question"]]
-    inputs = tokenizer(
-        questions,
-        examples["context"],
-        max_length=MAX_LENGTH,
-        truncation="only_second",
-        stride=DOC_STRIDE,
-        return_overflowing_tokens=True,
-        return_offsets_mapping=True,
-        padding="max_length",
-    )
-    sample_map = inputs.pop("overflow_to_sample_mapping")
-    example_ids = []
-    for i in range(len(inputs["input_ids"])):
-        example_ids.append(examples["id"][sample_map[i]])
-        seq_ids = inputs.sequence_ids(i)
-        # Use (-1, -1) sentinel for non-context tokens; Arrow can't store None in int lists
-        inputs["offset_mapping"][i] = [
-            (o[0], o[1]) if seq_ids[j] == 1 else (-1, -1)
-            for j, o in enumerate(inputs["offset_mapping"][i])
-        ]
-    inputs["example_id"] = example_ids
-    return inputs
-
-
-# ── 3. Answer postprocessing (SQuAD 2.0) ──────────────────────────────────────
-
-def postprocess_qa_predictions(examples, features, raw_logits,
-                                n_best=20, max_answer_len=30,
-                                null_thresh=NULL_SCORE_DIFF_THRESHOLD):
-    all_start_logits, all_end_logits = raw_logits
-
-    example_id_to_index = {ex["id"]: i for i, ex in enumerate(examples)}
-    features_per_example = collections.defaultdict(list)
-    for i, feat_id in enumerate(features["example_id"]):
-        features_per_example[example_id_to_index[feat_id]].append(i)
-
-    predictions, references = {}, {}
-
-    for ex_idx, example in enumerate(examples):
-        feat_indices   = features_per_example[ex_idx]
-        min_null_score = None
-        valid_answers  = []
-
-        context = example["context"]
-        for feat_idx in feat_indices:
-            start_logits = all_start_logits[feat_idx]
-            end_logits   = all_end_logits[feat_idx]
-            offsets      = features["offset_mapping"][feat_idx]
-
-            # Score for null answer (CLS token at index 0)
-            null_score = start_logits[0] + end_logits[0]
-            if min_null_score is None or null_score < min_null_score:
-                min_null_score = null_score
-
-            start_indexes = np.argsort(start_logits)[-1 : -n_best - 1 : -1].tolist()
-            end_indexes   = np.argsort(end_logits)[-1 : -n_best - 1 : -1].tolist()
-
-            for si in start_indexes:
-                for ei in end_indexes:
-                    # (-1, -1) sentinel means non-context token
-                    if offsets[si][0] == -1 or offsets[ei][0] == -1:
-                        continue
-                    if ei < si or ei - si + 1 > max_answer_len:
-                        continue
-                    valid_answers.append({
-                        "score": start_logits[si] + end_logits[ei],
-                        "text":  context[offsets[si][0]: offsets[ei][1]],
-                    })
-
-        if valid_answers:
-            best = sorted(valid_answers, key=lambda x: x["score"], reverse=True)[0]
-            if min_null_score - best["score"] > null_thresh:
-                predictions[example["id"]] = ""          # unanswerable
-            else:
-                predictions[example["id"]] = best["text"]
-        else:
-            predictions[example["id"]] = ""
-
-        # Ground-truth reference
-        references[example["id"]] = {
-            "answers": example["answers"],
-            "id":      example["id"],
-        }
-
-    return predictions, references
-
-
-# ── 4. Metrics ────────────────────────────────────────────────────────────────
-
-def normalize_answer(s: str) -> str:
-    import re, string
-    s = s.lower()
-    s = re.sub(r'\b(a|an|the)\b', ' ', s)
-    s = ''.join(ch for ch in s if ch not in string.punctuation)
-    return ' '.join(s.split())
-
-
-def f1_score(pred: str, gold: str) -> float:
-    pred_tokens = normalize_answer(pred).split()
-    gold_tokens = normalize_answer(gold).split()
-    common = collections.Counter(pred_tokens) & collections.Counter(gold_tokens)
-    num_same = sum(common.values())
-    if num_same == 0:
-        return 0.0
-    precision = num_same / len(pred_tokens)
-    recall    = num_same / len(gold_tokens)
-    return 2 * precision * recall / (precision + recall)
-
-
-def exact_match(pred: str, gold: str) -> float:
-    return float(normalize_answer(pred) == normalize_answer(gold))
-
-
-def compute_metrics(predictions: dict, references: dict):
-    em_scores, f1_scores = [], []
-    for qid, pred_text in predictions.items():
-        ref = references[qid]
-        gold_answers = ref["answers"]["text"]
-        if not gold_answers:                     # truly unanswerable
-            em_scores.append(float(pred_text == ""))
-            f1_scores.append(float(pred_text == ""))
-        else:
-            em_scores.append(max(exact_match(pred_text, g) for g in gold_answers))
-            f1_scores.append(max(f1_score(pred_text, g) for g in gold_answers))
-    return {
-        "exact_match": np.mean(em_scores) * 100,
-        "f1":          np.mean(f1_scores) * 100,
+def print_final_report(scores: dict, elapsed: float):
+    WIDTH = 62
+    print("\n" + "=" * WIDTH)
+    print("  JUDGE RELIABILITY HARNESS — FINAL REPORT")
+    print("=" * WIDTH)
+    print(f"  Judge model   : {MODEL}")
+    print(f"  Benchmark size: {len(BENCHMARK)} items  "
+          f"({sum(len(i['responses']) for i in BENCHMARK)} response variants)")
+    print(f"  Elapsed time  : {elapsed:.1f}s")
+    print("-" * WIDTH)
+    labels = {
+        "self_consistency":        "Self-Consistency    (agree across trials)",
+        "position_fairness":       "Position Fairness   (pairwise order swap)",
+        "calibration":             "Calibration         (Spearman rank corr.)",
+        "perturbation_robustness": "Perturbation Robust (prompt variation)",
+        "composite_reliability":   "── COMPOSITE RELIABILITY ──",
     }
+    for key, label in labels.items():
+        val   = scores[key]
+        bar   = "█" * int(val * 30) + "░" * (30 - int(val * 30))
+        grade = "PASS" if val >= 0.70 else ("WARN" if val >= 0.50 else "FAIL")
+        if key == "composite_reliability":
+            print("-" * WIDTH)
+        print(f"  {label:<42} {val:.3f}  [{grade}]")
+        print(f"    {bar}")
+    print("=" * WIDTH)
+    print()
 
 
-# ── 5. Training loop ──────────────────────────────────────────────────────────
-
-def train(model, train_loader, optimizer, scheduler, epoch: int):
-    model.train()
-    total_loss = 0.0
-    for step, batch in enumerate(train_loader):
-        batch = {k: v.to(DEVICE) for k, v in batch.items()}
-        outputs = model(**batch)
-        loss    = outputs.loss
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        scheduler.step()
-        optimizer.zero_grad()
-        total_loss += loss.item()
-        if (step + 1) % 10 == 0 or step == 0:
-            avg = total_loss / (step + 1)
-            print(f"  Epoch {epoch}  step {step+1:>3}/{len(train_loader)}  loss={avg:.4f}")
-    return total_loss / len(train_loader)
-
-
-def evaluate_model(model, eval_loader, eval_features, eval_examples):
-    """Run inference; eval_loader has only tensor columns (input_ids, attention_mask)."""
-    model.eval()
-    all_start, all_end = [], []
-    with torch.no_grad():
-        for batch in eval_loader:
-            batch = {k: v.to(DEVICE) for k, v in batch.items()}
-            out = model(**batch)
-            all_start.append(out.start_logits.cpu().numpy())
-            all_end.append(out.end_logits.cpu().numpy())
-
-    all_start = np.concatenate(all_start)
-    all_end   = np.concatenate(all_end)
-    preds, refs = postprocess_qa_predictions(
-        eval_examples, eval_features, (all_start, all_end)
-    )
-    return compute_metrics(preds, refs), preds
-
-
-# ── 6. Main ───────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────────────────────────
 
 def main():
-    print("=" * 60)
-    print(" NCTB-QA: Bangla Educational QA – POC")
-    print("=" * 60)
+    print("╔══════════════════════════════════════════════════════════╗")
+    print("║       Judge Reliability Harness — LLM Judge Stress Test  ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+    print(f"  Judge model   : {MODEL}")
+    print(f"  Benchmark     : {len(BENCHMARK)} items across free-response / coding / agentic")
+    print(f"  Trials        : {SELF_CONSISTENCY_TRIALS} per item (self-consistency test)")
+    print()
 
-    # Load dataset
-    raw_ds, ds_name = load_bangla_qa()
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ERROR: ANTHROPIC_API_KEY environment variable not set.")
+        sys.exit(1)
 
-    train_split = raw_ds.get("train", raw_ds.get("Train"))
-    eval_split  = raw_ds.get("validation", raw_ds.get("valid", raw_ds.get("test")))
+    t0 = time.time()
 
-    # Normalise to SQuAD 2.0 format
-    def norm(batch):
-        rows = [normalise_squad_example({k: batch[k][i] for k in batch})
-                for i in range(len(batch["question"]))]
-        return {k: [r[k] for r in rows] for k in rows[0]}
+    sc_df  = test_self_consistency()
+    pb_df  = test_position_bias()
+    cal_df = test_calibration()
+    rob_df = test_perturbation_robustness()
 
-    print("\nNormalising dataset …")
-    train_ds = train_split.select(range(min(TRAIN_LIMIT, len(train_split)))).map(
-        norm, batched=True, remove_columns=train_split.column_names
-    )
-    eval_ds = eval_split.select(range(min(EVAL_LIMIT, len(eval_split)))).map(
-        norm, batched=True, remove_columns=eval_split.column_names
-    )
+    elapsed = time.time() - t0
 
-    print(f"Train examples : {len(train_ds)}")
-    print(f"Eval  examples : {len(eval_ds)}")
-    print(f"\nSample question: {train_ds[0]['question']}")
-    print(f"Sample context : {train_ds[0]['context'][:120]} …")
-    print(f"Sample answer  : {train_ds[0]['answers']}")
+    scores = aggregate_report(sc_df, pb_df, cal_df, rob_df)
+    print_final_report(scores, elapsed)
 
-    # Tokeniser
-    print(f"\nLoading tokeniser: {MODEL_NAME} …")
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-    # Tokenise
-    print("Tokenising train set …")
-    train_features = train_ds.map(
-        lambda ex: preprocess_train(ex, tokenizer),
-        batched=True, remove_columns=train_ds.column_names
-    )
-    train_features.set_format("torch",
-        columns=["input_ids", "attention_mask", "start_positions", "end_positions"])
-
-    print("Tokenising eval set …")
-    eval_features = eval_ds.map(
-        lambda ex: preprocess_eval(ex, tokenizer),
-        batched=True, remove_columns=eval_ds.column_names
-    )
-
-    # For the DataLoader only include tensor-compatible columns
-    eval_features_loader = eval_features.remove_columns(["offset_mapping", "example_id"])
-    eval_features_loader.set_format("torch")
-
-    train_loader = DataLoader(train_features, batch_size=BATCH_SIZE, shuffle=True,
-                              collate_fn=default_data_collator)
-    eval_loader  = DataLoader(eval_features_loader, batch_size=BATCH_SIZE, shuffle=False,
-                              collate_fn=default_data_collator)
-
-    # Model
-    print(f"\nLoading model: {MODEL_NAME} for QA …")
-    model = AutoModelForQuestionAnswering.from_pretrained(MODEL_NAME).to(DEVICE)
-
-    total_steps   = len(train_loader) * NUM_EPOCHS
-    warmup_steps  = total_steps // 10
-    optimizer     = AdamW(model.parameters(), lr=LR, weight_decay=0.01)
-    scheduler     = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
-
-    # Training
-    print(f"\n{'─'*60}")
-    print(f"Training for {NUM_EPOCHS} epochs on {ds_name}")
-    print(f"{'─'*60}")
-    history = []
-    for epoch in range(1, NUM_EPOCHS + 1):
-        avg_loss = train(model, train_loader, optimizer, scheduler, epoch)
-        print(f"→ Epoch {epoch} avg loss: {avg_loss:.4f}")
-        history.append(avg_loss)
-
-    # Loss summary table
-    print(f"\n{'─'*60}")
-    print("Training loss per epoch:")
-    df_loss = pd.DataFrame({
-        "epoch": list(range(1, NUM_EPOCHS + 1)),
-        "avg_loss": [round(l, 4) for l in history],
-    })
-    print(df_loss.to_string(index=False))
-    assert history[-1] < history[0], (
-        f"Loss did not decrease: {history[0]:.4f} → {history[-1]:.4f}"
-    )
-    print(f"✓ Loss decreased: {history[0]:.4f} → {history[-1]:.4f}")
-
-    # Evaluation
-    print(f"\n{'─'*60}")
-    print("Evaluating on held-out set …")
-    metrics, preds = evaluate_model(model, eval_loader, eval_features, eval_ds)
-    print(f"\n{'─'*60}")
-    print(f"{'Metric':<20} {'Score':>8}")
-    print(f"{'─'*28}")
-    print(f"{'Exact Match':<20} {metrics['exact_match']:>7.2f}%")
-    print(f"{'F1 Score':<20} {metrics['f1']:>7.2f}%")
-    print(f"{'─'*28}")
-
-    # Unanswerable stats
-    unanswerable_predicted = sum(1 for v in preds.values() if v == "")
-    unanswerable_gt = sum(1 for ex in eval_ds if len(ex["answers"]["text"]) == 0)
-    print(f"\nUnanswerable questions in eval set : {unanswerable_gt}")
-    print(f"Unanswerable questions predicted   : {unanswerable_predicted}")
-
-    # Show example predictions
-    print(f"\n{'─'*60}")
-    print("Example Predictions:")
-    print(f"{'─'*60}")
-    shown = 0
-    for ex in eval_ds:
-        if shown >= 5:
-            break
-        qid  = ex["id"]
-        pred = preds.get(qid, "(not found)")
-        gold = ex["answers"]["text"]
-        print(f"\n[Q] {ex['question']}")
-        print(f"[Gold] {gold if gold else '(unanswerable)'}")
-        print(f"[Pred] {pred if pred else '(unanswerable)'}")
-        shown += 1
-
-    # Save results
-    results = {
-        "dataset":          ds_name,
-        "model":            MODEL_NAME,
-        "train_examples":   len(train_ds),
-        "eval_examples":    len(eval_ds),
-        "epochs":           NUM_EPOCHS,
-        "loss_history":     history,
-        "exact_match":      round(metrics["exact_match"], 2),
-        "f1":               round(metrics["f1"], 2),
-        "unanswerable_gt":  unanswerable_gt,
-        "unanswerable_pred":unanswerable_predicted,
+    # Save detailed results
+    out = {
+        "config": {"model": MODEL, "benchmark_size": len(BENCHMARK), "trials": SELF_CONSISTENCY_TRIALS},
+        "scores": scores,
+        "self_consistency": sc_df.drop(columns=["ordinal_scores", "binary_judgments"]).to_dict(orient="records"),
+        "position_bias":    pb_df.to_dict(orient="records"),
+        "calibration":      cal_df.to_dict(orient="records"),
+        "robustness":       rob_df.drop(columns=["perturbed_scores"]).to_dict(orient="records"),
     }
-    with open("results.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"\n✓ Results saved to results.json")
-
-    # DataFrame summary
-    df = pd.DataFrame([results])
-    print(f"\nFinal Summary:\n{df[['dataset','model','exact_match','f1']].to_string(index=False)}")
-    print("\nDone.")
+    with open("results.json", "w") as f:
+        json.dump(out, f, indent=2)
+    print(f"  Detailed results saved to results.json")
 
 
 if __name__ == "__main__":

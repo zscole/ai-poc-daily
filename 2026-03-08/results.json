@@ -1,0 +1,279 @@
+{
+  "config": {
+    "model": "claude-haiku-4-5-20251001",
+    "benchmark_size": 3,
+    "trials": 3
+  },
+  "scores": {
+    "self_consistency": 0.993,
+    "position_fairness": 0.5,
+    "calibration": 0.965,
+    "perturbation_robustness": 0.938,
+    "composite_reliability": 0.849
+  },
+  "self_consistency": [
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "excellent",
+      "score_mean": 5.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "good",
+      "score_mean": 4.67,
+      "score_std": 0.471,
+      "score_var": 0.222,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "poor",
+      "score_mean": 4.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "wrong",
+      "score_mean": 1.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "excellent",
+      "score_mean": 4.67,
+      "score_std": 0.471,
+      "score_var": 0.222,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "good",
+      "score_mean": 4.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "poor",
+      "score_mean": 1.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "wrong",
+      "score_mean": 1.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "quality": "excellent",
+      "score_mean": 4.33,
+      "score_std": 0.471,
+      "score_var": 0.222,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "quality": "good",
+      "score_mean": 4.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "quality": "poor",
+      "score_mean": 2.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "quality": "wrong",
+      "score_mean": 2.0,
+      "score_std": 0.0,
+      "score_var": 0.0,
+      "binary_agree": 1.0
+    }
+  ],
+  "position_bias": [
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "pair": "excellent vs poor",
+      "forward_winner": "A",
+      "reversed_winner": "B",
+      "fwd_correct": true,
+      "rev_correct": true,
+      "position_consistent": true
+    },
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "pair": "good vs wrong",
+      "forward_winner": "A",
+      "reversed_winner": "tie",
+      "fwd_correct": true,
+      "rev_correct": false,
+      "position_consistent": false
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "pair": "excellent vs poor",
+      "forward_winner": "A",
+      "reversed_winner": "tie",
+      "fwd_correct": true,
+      "rev_correct": false,
+      "position_consistent": false
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "pair": "good vs wrong",
+      "forward_winner": "A",
+      "reversed_winner": "tie",
+      "fwd_correct": true,
+      "rev_correct": false,
+      "position_consistent": false
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "pair": "excellent vs poor",
+      "forward_winner": "A",
+      "reversed_winner": "B",
+      "fwd_correct": true,
+      "rev_correct": true,
+      "position_consistent": true
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "pair": "good vs wrong",
+      "forward_winner": "A",
+      "reversed_winner": "B",
+      "fwd_correct": true,
+      "rev_correct": true,
+      "position_consistent": true
+    }
+  ],
+  "calibration": [
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "expected_ranks": [
+        4,
+        3,
+        2,
+        1
+      ],
+      "actual_scores": [
+        5,
+        4,
+        4,
+        1
+      ],
+      "spearman_corr": 0.949,
+      "spearman_pval": 0.0513,
+      "monotonic": true
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "expected_ranks": [
+        4,
+        3,
+        2,
+        1
+      ],
+      "actual_scores": [
+        5,
+        4,
+        1,
+        1
+      ],
+      "spearman_corr": 0.949,
+      "spearman_pval": 0.0513,
+      "monotonic": true
+    },
+    {
+      "item_id": "data_analysis_agent",
+      "format": "agentic",
+      "expected_ranks": [
+        4,
+        3,
+        2,
+        1
+      ],
+      "actual_scores": [
+        4,
+        4,
+        2,
+        2
+      ],
+      "spearman_corr": 0.894,
+      "spearman_pval": 0.1056,
+      "monotonic": true
+    }
+  ],
+  "robustness": [
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "good",
+      "score_mean": 4.0,
+      "score_std": 0.0,
+      "score_range": 0
+    },
+    {
+      "item_id": "photosynthesis",
+      "format": "free-response",
+      "quality": "poor",
+      "score_mean": 3.0,
+      "score_std": 0.0,
+      "score_range": 0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "good",
+      "score_mean": 4.0,
+      "score_std": 0.0,
+      "score_range": 0
+    },
+    {
+      "item_id": "prime_check",
+      "format": "coding",
+      "quality": "poor",
+      "score_mean": 1.25,
+      "score_std": 0.433,
+      "score_range": 1
+    }
+  ]
+}

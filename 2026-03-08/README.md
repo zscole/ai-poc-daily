@@ -1,111 +1,90 @@
-# NCTB-QA: Bangla Educational Question Answering – POC
+# Judge Reliability Harness
 
-Reproduces the core methodology of the **NCTB-QA** paper:
-*"NCTB-QA: A Large-Scale Bangla Educational Question Answering Dataset and Benchmarking Performance"*
+Stress-tests the reliability of LLM judges across four independent dimensions using real API calls — no mocks, no hardcoded scores.
 
 ## What it does
 
-| Step | Description |
-|------|-------------|
-| Data | Loads **BnQUAD** (or NCTB-QA if available) — real Bangla QA data from HuggingFace |
-| Model | Fine-tunes **XLM-RoBERTa-base** for extractive question answering |
-| Unanswerable | Detects unanswerable questions via null-answer (CLS) score threshold |
-| Training | 3 epochs with AdamW + linear warmup scheduler; loss visibly decreases |
-| Evaluation | Reports **Exact Match** and **F1** on a held-out split |
-| Output | Saves `results.json` with all metrics + shows example predictions |
+Given a benchmark of question/response pairs at known quality levels, the harness asks a judge model (claude-haiku) to evaluate them and measures:
 
-## Architecture
+| Test | What it measures |
+|------|-----------------|
+| **Self-Consistency** | Same input judged N times — do scores agree? |
+| **Position Bias** | Pairwise comparison with order swapped — does position affect preference? |
+| **Calibration** | Known quality ordering (excellent > good > poor > wrong) — Spearman rank correlation |
+| **Perturbation Robustness** | Minor prompt-prefix rewording — score stability |
 
-```
-Context + Question
-       │
-  XLM-RoBERTa-base (multilingual transformer)
-       │
-  QA head: start_logits, end_logits per token
-       │
-  ┌────┴────────────────────┐
-  │  Null score > threshold? │
-  │  → "unanswerable"        │
-  │  else → extract span     │
-  └──────────────────────────┘
-```
+Each dimension produces a 0–1 score, combined into a **composite reliability score**.
 
-## How to run
+## Benchmark
+
+Three task formats are included:
+- **Free-response** — explain photosynthesis
+- **Coding** — write a prime-checking function
+- **Agentic** — evaluate a multi-step agent execution trace
+
+Each item has four response variants: `excellent`, `good`, `poor`, `wrong`.
+
+## Setup
 
 ```bash
-# Install dependencies
 pip install -r requirements.txt
+export ANTHROPIC_API_KEY=your_key_here
+```
 
-# Run
+## Run
+
+```bash
 python main.py
 ```
 
-Runs on CPU or GPU automatically. On CPU expect ~5–15 min depending on hardware.
+Completes in ~1–2 minutes on a standard connection (~90 API calls to claude-haiku-4-5).
 
 ## Expected output
 
 ```
-============================================================
- NCTB-QA: Bangla Educational QA – POC
-============================================================
-Device: cpu
-Trying to load NCTB-QA ...
-✓ Loaded BnQUAD: DatasetDict(...)
+╔══════════════════════════════════════════════════════════╗
+║       Judge Reliability Harness — LLM Judge Stress Test  ║
+╚══════════════════════════════════════════════════════════╝
 
-Train examples : 300
-Eval  examples : 100
-
-Sample question: বাংলাদেশের রাজধানী কোথায়?
-...
-
-Training for 3 epochs on BnQUAD
-────────────────────────────────────────────────────────────
-  Epoch 1  step   1/ 38  loss=5.6231
-  Epoch 1  step  10/ 38  loss=5.1047
+TEST 1/4: Self-Consistency  (3 trials per item)
+  [01/12] photosynthesis       excellent  trial 1: ordinal=5  binary=good
   ...
-  Epoch 3  step  38/ 38  loss=2.8903
 
-Training loss per epoch:
- epoch  avg_loss
-     1    5.2100
-     2    3.6400
-     3    2.8900
+TEST 2/4: Position Bias
+  photosynthesis        excellent  vs poor       │ fwd=A  rev=B  consistent=True
+  ...
 
-✓ Loss decreased: 5.2100 → 2.8900
+TEST 3/4: Calibration
+  photosynthesis        excellent  → score=5  (expected rank 4)
+  ...
 
-────────────────────────────────────────────────────────────
-Metric                  Score
-────────────────────────────
-Exact Match             42.00%
-F1 Score                61.50%
-────────────────────────────
+TEST 4/4: Perturbation Robustness
+  photosynthesis        good   prefix 1: score=4
+  ...
 
-Example Predictions:
-────────────────────────────────────────────────────────────
-
-[Q] বাংলাদেশের রাজধানী কোথায়?
-[Gold] ['ঢাকা']
-[Pred] ঢাকা
-
-✓ Results saved to results.json
+══════════════════════════════════════════════════════════════
+  JUDGE RELIABILITY HARNESS — FINAL REPORT
+══════════════════════════════════════════════════════════════
+  Self-Consistency    (agree across trials)         0.917  [PASS]
+  Position Fairness   (pairwise order swap)         1.000  [PASS]
+  Calibration         (Spearman rank corr.)         0.875  [PASS]
+  Perturbation Robust (prompt variation)            0.875  [PASS]
+──────────────────────────────────────────────────────────────
+  ── COMPOSITE RELIABILITY ──                       0.917  [PASS]
+══════════════════════════════════════════════════════════════
 ```
 
-> Exact scores will vary slightly by run. Expect EM ~35–55%, F1 ~55–70% for 300 training examples.
+Detailed results are written to `results.json`.
 
-## Key parameters (main.py)
+## Scoring
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `MODEL_NAME` | `xlm-roberta-base` | Base model (multilingual) |
-| `TRAIN_LIMIT` | 300 | Training examples (increase for better accuracy) |
-| `EVAL_LIMIT` | 100 | Evaluation examples |
-| `NUM_EPOCHS` | 3 | Training epochs |
-| `NULL_SCORE_DIFF_THRESHOLD` | 0.0 | Unanswerable detection sensitivity |
-| `MAX_LENGTH` | 384 | Max tokens per passage chunk |
-| `DOC_STRIDE` | 128 | Sliding window stride for long contexts |
+- **PASS** ≥ 0.70 — judge is reliable on this dimension
+- **WARN** 0.50–0.69 — moderate reliability issues
+- **FAIL** < 0.50 — significant reliability problems
 
-## Dataset
+## Extending the harness
 
-**BnQUAD** (Bangla Question Answering Dataset) — 87k+ QA pairs from Bangladeshi texts, available on HuggingFace as `csebuetnlp/bnquad`. Format mirrors SQuAD 1.1 but in Bangla.
-
-**NCTB-QA** adds 87,805 pairs from 50 NCTB textbooks with unanswerable questions, closely matching the paper's setup.
+- Add items to `BENCHMARK` in `main.py` (any number of formats/qualities)
+- Change `MODEL` to swap in a different judge
+- Increase `SELF_CONSISTENCY_TRIALS` for stronger consistency estimates
+- Add prompt prefixes to `PROMPT_PREFIXES` for broader perturbation coverage
