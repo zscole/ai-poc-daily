@@ -1,0 +1,14 @@
+[
+  {
+    "lesson": "Test lesson",
+    "category": "testing",
+    "source": "test topic",
+    "added": "2026-03-08T18:12:44.345055"
+  },
+  {
+    "lesson": "Topics requiring GPU acceleration fail on CPU-only systems. Filter these in scoring or ensure CPU fallback in prompts.",
+    "category": "hardware",
+    "source": "GPU training",
+    "added": "2026-03-08T18:12:44.347236"
+  }
+]

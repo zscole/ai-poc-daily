@@ -1,0 +1,133 @@
+{
+  "runs": [
+    {
+      "topic": "test topic",
+      "started": "2026-03-08T18:12:44.084221",
+      "stages": [
+        {
+          "stage": "scout",
+          "model": "default",
+          "seconds": 5.0,
+          "cost_usd": 0.0125
+        },
+        {
+          "stage": "builder",
+          "model": "claude",
+          "seconds": 60.0,
+          "cost_usd": 0.15
+        }
+      ],
+      "total_seconds": 65.0,
+      "estimated_cost_usd": 0.1625,
+      "ended": "2026-03-08T18:12:44.084278",
+      "success": true
+    },
+    {
+      "topic": "audit test",
+      "started": "2026-03-08T18:15:42.089858",
+      "stages": [
+        {
+          "stage": "test",
+          "model": "default",
+          "seconds": 1.0,
+          "cost_usd": 0.0025
+        }
+      ],
+      "total_seconds": 1.0,
+      "estimated_cost_usd": 0.0025,
+      "ended": "2026-03-08T18:15:42.089870",
+      "success": true
+    },
+    {
+      "topic": "scouting",
+      "started": "2026-03-08T18:26:31.441322",
+      "stages": [
+        {
+          "stage": "scout",
+          "model": "default",
+          "seconds": 48.0,
+          "cost_usd": 0.1199
+        },
+        {
+          "stage": "build",
+          "model": "default",
+          "seconds": 299.8,
+          "cost_usd": 0.7495
+        },
+        {
+          "stage": "validate",
+          "model": "default",
+          "seconds": 0.0,
+          "cost_usd": 0.0
+        },
+        {
+          "stage": "validate",
+          "model": "default",
+          "seconds": 0.0,
+          "cost_usd": 0.0
+        }
+      ],
+      "total_seconds": 347.774849458001,
+      "estimated_cost_usd": 0.8694,
+      "ended": "2026-03-08T18:34:39.518153",
+      "success": false
+    },
+    {
+      "topic": "scouting",
+      "started": "2026-03-08T18:53:21.378742",
+      "stages": [
+        {
+          "stage": "scout",
+          "model": "default",
+          "seconds": 42.0,
+          "cost_usd": 0.1051
+        },
+        {
+          "stage": "build",
+          "model": "default",
+          "seconds": 203.9,
+          "cost_usd": 0.5097
+        },
+        {
+          "stage": "validate",
+          "model": "default",
+          "seconds": 94.3,
+          "cost_usd": 0.2356
+        }
+      ],
+      "total_seconds": 340.15716366701236,
+      "estimated_cost_usd": 0.8504,
+      "ended": "2026-03-08T18:59:01.538892",
+      "success": true
+    },
+    {
+      "topic": "scouting",
+      "started": "2026-03-08T19:22:33.188787",
+      "stages": [
+        {
+          "stage": "scout",
+          "model": "default",
+          "seconds": 39.5,
+          "cost_usd": 0.0986
+        },
+        {
+          "stage": "build",
+          "model": "default",
+          "seconds": 244.1,
+          "cost_usd": 0.6103
+        },
+        {
+          "stage": "validate",
+          "model": "default",
+          "seconds": 60.1,
+          "cost_usd": 0.1502
+        }
+      ],
+      "total_seconds": 343.6718966670014,
+      "estimated_cost_usd": 0.8592,
+      "ended": "2026-03-08T19:28:16.888058",
+      "success": true
+    }
+  ],
+  "total_usd": 2.744
+}

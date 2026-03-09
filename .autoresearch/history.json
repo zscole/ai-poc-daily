@@ -1,0 +1,46 @@
+[
+  {
+    "timestamp": "2026-03-08T16:00:14.602230",
+    "topic": {
+      "title": "Thermodynamic Response Functions in Singular Bayesian Models",
+      "source": "arxiv",
+      "approach": "traditional_ml",
+      "url": "https://arxiv.org/abs/2603.05480v1"
+    },
+    "success": false,
+    "reason": "Build failed"
+  },
+  {
+    "timestamp": "2026-03-08T18:34:39.517091",
+    "topic": {
+      "title": "\ud83e\uddf5 Excited to share our new paper at #ICLR2026: LUMINA: Detecting Hallucinations in RAG System with C",
+      "source": "x",
+      "approach": "retrieval",
+      "url": "https://x.com/i/status/2030536680554234224"
+    },
+    "success": false,
+    "reason": "[main.py] Loop body is only print/sleep \u2014 fake training"
+  },
+  {
+    "timestamp": "2026-03-08T18:59:01.536690",
+    "topic": {
+      "title": "CoPaw",
+      "source": "github_trending",
+      "approach": "general",
+      "url": "https://github.com/agentscope-ai/CoPaw"
+    },
+    "success": true,
+    "reason": "\u2705 POC VALIDATION PASSED\n\n  \u2713 structure\n  \u2713 ast_patterns\n  \u2713 library_usage\n  \u2713 execution\n  \u2713 output_variance\n  \u2713 tests\n  \u2713 ml_training\n  \u2713 llm_review\n\nLibraries: matplotlib, numpy, sklearn, torch"
+  },
+  {
+    "timestamp": "2026-03-08T19:28:16.887238",
+    "topic": {
+      "title": "Agent Safehouse \u2013 macOS-native sandboxing for local agents",
+      "source": "hackernews",
+      "approach": "agentic",
+      "url": "https://agent-safehouse.dev/"
+    },
+    "success": true,
+    "reason": "\u2705 POC VALIDATION PASSED\n\n  \u2713 structure\n  \u2713 ast_patterns\n  \u2713 library_usage\n  \u2713 execution\n  \u2713 output_variance\n  \u2713 tests\n  \u2713 ml_training\n  \u2713 llm_review\n\nLibraries: numpy, pandas, sklearn"
+  }
+]
